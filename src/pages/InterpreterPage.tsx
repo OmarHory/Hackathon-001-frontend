@@ -155,13 +155,7 @@ const EmptyState = styled.div`
   }
 `;
 
-const DebugSection = styled(Container)`
-  margin-bottom: 20px;
-  background: rgba(255, 0, 0, 0.1);
-  border: 1px solid rgba(255, 0, 0, 0.3);
-  font-family: monospace;
-  font-size: 0.8rem;
-`;
+
 
 const InterpreterPage: React.FC = () => {
   // Use the real voice conversation hook
@@ -243,46 +237,7 @@ const InterpreterPage: React.FC = () => {
         <Subtitle>Real-time English ↔ Spanish interpretation for medical consultations</Subtitle>
       </HeaderSection>
 
-      {/* Debug Information */}
-      <DebugSection>
-        <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>🐛 Debug Information</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-          <div>
-            <strong>Connection Status:</strong><br />
-            {isConnected ? '✅ Connected' : '❌ Not Connected'}<br />
-            <strong>Session ID:</strong><br />
-            {connection?.sessionId || 'None'}<br />
-            <strong>Voice State:</strong><br />
-            {JSON.stringify(voiceState, null, 2)}
-          </div>
-          <div>
-            <strong>Translation Pairs:</strong><br />
-            {translationPairs.length} pairs<br />
-            <strong>Latest Translation:</strong><br />
-            {translationPairs[0]?.translatedText || 'None'}<br />
-            <strong>Data Channel:</strong><br />
-            {connection?.dataChannel ? '✅ Open' : '❌ Closed'}
-          </div>
-        </div>
-        <div style={{ 
-          marginTop: '15px', 
-          padding: '10px', 
-          background: 'rgba(0, 255, 0, 0.1)', 
-          borderRadius: '5px',
-          border: '1px solid rgba(0, 255, 0, 0.3)'
-        }}>
-          <strong style={{ color: '#00ff00' }}>💾 Message Saving Status:</strong><br />
-          <span style={{ fontSize: '0.9rem' }}>
-            All conversation messages (user & assistant) are automatically saved to the database.<br />
-            ✅ Backend API: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}<br />
-            📊 Total Conversations Saved: {translationPairs.length * 2} messages<br />
-            🔍 Check browser console for detailed saving logs
-          </span>
-        </div>
-        <div style={{ marginTop: '10px', fontSize: '0.7rem', opacity: 0.7 }}>
-          💡 Open browser console (F12) to see detailed WebRTC, OpenAI events, and message saving
-        </div>
-      </DebugSection>
+
 
       <ControlsSection>
         <StatusSection>
@@ -433,9 +388,6 @@ const InterpreterPage: React.FC = () => {
               ? "✅ Connected! Speak in English or Spanish to see translations here..." 
               : "❌ Click 'Start Medical Interpretation' to begin"
             }
-            <div style={{ marginTop: '15px', fontSize: '0.9rem', opacity: 0.8 }}>
-              💡 If connected but no translations appear, check the debug section above and browser console
-            </div>
           </EmptyState>
         )}
       </TranslationsSection>
