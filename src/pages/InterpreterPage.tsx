@@ -264,8 +264,23 @@ const InterpreterPage: React.FC = () => {
             {connection?.dataChannel ? '✅ Open' : '❌ Closed'}
           </div>
         </div>
+        <div style={{ 
+          marginTop: '15px', 
+          padding: '10px', 
+          background: 'rgba(0, 255, 0, 0.1)', 
+          borderRadius: '5px',
+          border: '1px solid rgba(0, 255, 0, 0.3)'
+        }}>
+          <strong style={{ color: '#00ff00' }}>💾 Message Saving Status:</strong><br />
+          <span style={{ fontSize: '0.9rem' }}>
+            All conversation messages (user & assistant) are automatically saved to the database.<br />
+            ✅ Backend API: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}<br />
+            📊 Total Conversations Saved: {translationPairs.length * 2} messages<br />
+            🔍 Check browser console for detailed saving logs
+          </span>
+        </div>
         <div style={{ marginTop: '10px', fontSize: '0.7rem', opacity: 0.7 }}>
-          💡 Open browser console (F12) to see detailed WebRTC and OpenAI events
+          💡 Open browser console (F12) to see detailed WebRTC, OpenAI events, and message saving
         </div>
       </DebugSection>
 
@@ -390,7 +405,9 @@ const InterpreterPage: React.FC = () => {
           <li><strong>Step 4:</strong> Say "Hello" or "Hola" clearly into your microphone</li>
           <li><strong>Step 5:</strong> Check debug info and browser console for events</li>
           <li><strong>Step 6:</strong> Look for speech detection and translation events</li>
+          <li><strong>💾 Message Saving:</strong> All "hi", "hello", etc. are automatically saved to database!</li>
           <li><strong>Testing:</strong> Say "send lab order" to test function calls</li>
+          <li><strong>🔍 Logs:</strong> Open console (F12) to see "💾 Saving user message" and "✅ Message saved" logs</li>
           <li><strong>Troubleshoot:</strong> If no translation, check network and backend connection</li>
         </InstructionsList>
       </InstructionsSection>

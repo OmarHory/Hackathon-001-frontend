@@ -74,15 +74,36 @@ export const saveMessage = createAsyncThunk(
       requestBody.confidence_score = confidenceScore;
     }
     
-    const response = await fetch(`${process.env.REACT_APP_API_URL}/conversations/${sessionId}/messages`, {
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    const fullUrl = `${apiUrl}/conversations/${sessionId}/messages`;
+    
+    console.log('🌐 Making API request to save message:', {
+      url: fullUrl,
+      method: 'POST',
+      body: requestBody
+    });
+    
+    const response = await fetch(fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
+    
+    console.log('📡 Save message API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    });
+    
     if (!response.ok) {
-      throw new Error('Failed to save message');
+      const errorText = await response.text();
+      console.error('❌ Save message API error:', errorText);
+      throw new Error(`Failed to save message: ${response.status} - ${errorText}`);
     }
-    return await response.json();
+    
+    const result = await response.json();
+    console.log('✅ Message saved successfully to database:', result);
+    return result;
   }
 );
 

@@ -114,19 +114,41 @@ export const useVoiceConversation = () => {
         }));
       }
 
-      // Save assistant message to database (as per API doc)
-      if (connection?.sessionId && finalText) {
+      // Save assistant message to database (as per API doc) - Enhanced session ID lookup
+      const sessionId = connection?.sessionId || currentSession?.session_id || webrtcService.getConnection().sessionId;
+      
+      if (sessionId && finalText) {
+        console.log('💾 Saving assistant message to database:', {
+          sessionId: sessionId,
+          content: finalText,
+          messageType: 'assistant',
+          source: connection?.sessionId ? 'redux-connection' : currentSession?.session_id ? 'redux-session' : 'webrtc-service'
+        });
+        
         dispatch(saveMessage({
-          sessionId: connection.sessionId,
+          sessionId: sessionId,
           messageType: 'assistant',
           content: finalText,
           // Add audio duration estimate (approximate)
           audioDuration: finalText.length * 0.1, // Rough estimate: 10 chars per second
           confidenceScore: 0.98 // High confidence for OpenAI responses
-        })).catch((error) => {
-          console.warn('Failed to save assistant message:', error);
+        })).then((result) => {
+          console.log('✅ Assistant message saved successfully:', result);
+        }).catch((error) => {
+          console.error('❌ Failed to save assistant message:', error);
+          console.error('   Session ID used:', sessionId);
+          console.error('   API URL:', process.env.REACT_APP_API_URL);
+          console.error('   Full error:', error);
           // Continue operation even if save fails
         });
+      } else {
+        console.warn('⚠️ No session ID or final text for saving assistant message');
+        console.warn('   Session ID attempts:', {
+          reduxConnection: connection?.sessionId,
+          reduxSession: currentSession?.session_id,
+          webrtcService: webrtcService.getConnection().sessionId
+        });
+        console.warn('   Final text:', finalText);
       }
 
       assistantTranscriptRef.current = '';
@@ -407,18 +429,37 @@ export const useVoiceConversation = () => {
       
       createTranslationPair(transcript, '', originalLang, translatedLang);
 
-      // Save user message to database (as per API doc)
-      if (connection?.sessionId) {
+      // Save user message to database (as per API doc) - Enhanced session ID lookup
+      const sessionId = connection?.sessionId || currentSession?.session_id || webrtcService.getConnection().sessionId;
+      
+      if (sessionId) {
+        console.log('💾 Saving user message to database:', {
+          sessionId: sessionId,
+          content: transcript,
+          messageType: 'user',
+          source: connection?.sessionId ? 'redux-connection' : currentSession?.session_id ? 'redux-session' : 'webrtc-service'
+        });
+        
         dispatch(saveMessage({
-          sessionId: connection.sessionId,
+          sessionId: sessionId,
           messageType: 'user',
           content: transcript,
           // Add confidence score if available from speech recognition
           confidenceScore: 0.95 // Default high confidence for successful transcription
-        })).catch((error) => {
-          console.warn('Failed to save user message:', error);
+        })).then((result) => {
+          console.log('✅ User message saved successfully:', result);
+        }).catch((error) => {
+          console.error('❌ Failed to save user message:', error);
+          console.error('   Session ID used:', sessionId);
+          console.error('   API URL:', process.env.REACT_APP_API_URL);
+          console.error('   Full error:', error);
           // Continue operation even if save fails
         });
+      } else {
+        console.warn('⚠️ No session ID available from ANY source for saving user message');
+        console.warn('   Redux connection:', connection);
+        console.warn('   Redux session:', currentSession);
+        console.warn('   WebRTC service:', webrtcService.getConnection());
       }
 
       dispatch(setPendingUserMessage(false));
