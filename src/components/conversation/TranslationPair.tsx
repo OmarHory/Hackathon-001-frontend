@@ -106,17 +106,29 @@ const TranslationPair: React.FC<TranslationPairProps> = ({ pair, style = {} }) =
               padding: '12px',
               borderRadius: '8px',
               border: '1px solid rgba(135, 206, 235, 0.3)',
-              color: pair.isComplete ? 'white' : '#B0B0B0',
+              color: pair.translatedText ? (pair.isComplete ? 'white' : '#E0E0E0') : '#B0B0B0',
               fontStyle: pair.isComplete ? 'normal' : 'italic',
             }}
           >
-            {pair.isComplete ? pair.translatedText : 'Translating...'}
+            {pair.translatedText || 'Translating...'}
+            {pair.translatedText && !pair.isComplete && (
+              <span style={{ 
+                marginLeft: '5px', 
+                animation: 'blink 1s infinite',
+                color: '#87CEEB'
+              }}>●</span>
+            )}
           </div>
         </div>
       </div>
 
       <style>
         {`
+          @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+          }
+          
           @media (max-width: 768px) {
             .flex-container {
               flex-direction: column !important;

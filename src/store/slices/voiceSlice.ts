@@ -208,6 +208,7 @@ const voiceSlice = createSlice({
   extraReducers: (builder) => {
     builder
       .addCase(startVoiceSession.pending, (state) => {
+        state.connection.connectionState = 'connecting';
         state.voiceState.currentStatus = '🎙️ Getting microphone access...';
         state.voiceState.isError = false;
       })
@@ -219,6 +220,7 @@ const voiceSlice = createSlice({
         state.conversationEnded = false;
       })
       .addCase(startVoiceSession.rejected, (state, action) => {
+        state.connection.connectionState = 'failed';
         state.voiceState.currentStatus = `❌ Error: ${action.payload}`;
         state.voiceState.isError = true;
         state.voiceState.isConnected = false;

@@ -9,6 +9,7 @@ interface ConversationState {
   conversationHistory: Session[];
   selectedConversation: ConversationDetails | null;
   loading: boolean;
+  summaryGenerating: boolean;
   error: string | null;
 }
 
@@ -20,6 +21,7 @@ const initialState: ConversationState = {
   conversationHistory: [],
   selectedConversation: null,
   loading: false,
+  summaryGenerating: false,
   error: null,
 };
 
@@ -214,12 +216,18 @@ const conversationSlice = createSlice({
         state.error = action.error.message || 'Failed to end session';
       })
       // Generate summary
+      .addCase(generateSummary.pending, (state) => {
+        state.summaryGenerating = true;
+        state.error = null;
+      })
       .addCase(generateSummary.fulfilled, (state, action) => {
+        state.summaryGenerating = false;
         if (state.selectedConversation) {
           state.selectedConversation.summary = action.payload.summary;
         }
       })
       .addCase(generateSummary.rejected, (state, action) => {
+        state.summaryGenerating = false;
         state.error = action.error.message || 'Failed to generate summary';
       });
   },

@@ -101,7 +101,7 @@ export const useVoiceConversation = () => {
         isListening: false 
       }));
       
-    }, 8000); // Only trigger after 8 seconds of total silence
+    }, 4000); // Reduced to 4 seconds for faster recovery
   }, [dispatch]);
 
   const clearEmergencyTimeout = useCallback(() => {
@@ -382,7 +382,7 @@ export const useVoiceConversation = () => {
         type: "response.create",
         response: {
           modalities: ["text", "audio"],
-          instructions: "Just say 'Done' - do not translate anything. The medical action has been completed successfully."
+          instructions: "ONLY say 'Done' - one word only. Do NOT say anything else. Do NOT provide explanations. Do NOT translate. Just 'Done'."
         }
       };
       
@@ -587,6 +587,15 @@ export const useVoiceConversation = () => {
           
           // Start emergency timeout only if needed
           startEmergencyTimeout();
+          
+          // Add a shorter timeout to check if we're getting deltas
+          setTimeout(() => {
+            if (currentPairRef.current && assistantTranscriptRef.current === '') {
+              console.log('⚠️ No deltas received after 2 seconds, translation may be stuck');
+              console.log('🔧 Current pair:', currentPairRef.current);
+              console.log('🔧 Current transcript:', assistantTranscriptRef.current);
+            }
+          }, 2000);
           break;
 
         case 'response.output_item.added':
@@ -599,9 +608,13 @@ export const useVoiceConversation = () => {
 
         case 'response.audio_transcript.delta':
           console.log('🔤 Audio transcript delta:', event.delta);
+          console.log('🔍 Current pair ref:', currentPairRef.current);
+          console.log('🔍 Assistant transcript so far:', assistantTranscriptRef.current);
           if (event.delta && event.delta.trim()) {
             console.log('📝 Updating assistant transcript with delta');
             updateAssistantTranscript(event.delta);
+          } else {
+            console.log('⚠️ Empty or invalid delta received');
           }
           break;
 
@@ -623,11 +636,24 @@ export const useVoiceConversation = () => {
 
         case 'response.done':
           console.log('🏁 OpenAI response completed');
+          console.log('🔍 Final assistant transcript:', assistantTranscriptRef.current);
+          console.log('🔍 Current pair ref:', currentPairRef.current);
+          
+          // If we have a pair but no transcript, something went wrong
+          if (currentPairRef.current && assistantTranscriptRef.current === '') {
+            console.log('🚨 Response done but no transcript received! Forcing fallback completion');
+            dispatch(updateTranslationPair({
+              id: currentPairRef.current,
+              translatedText: 'Translation not received - please try again',
+              isComplete: true
+            }));
+          }
           
           // Clear any emergency timeouts and ensure ready state
           clearEmergencyTimeout();
           dispatch(setPendingUserMessage(false));
           assistantTranscriptRef.current = '';
+          currentPairRef.current = null;
           
           // Set ready state
           dispatch(updateVoiceStatus({ 
@@ -640,6 +666,7 @@ export const useVoiceConversation = () => {
           console.log('📝 User speech transcription completed:', event.transcript);
           if (event.transcript) {
             console.log('🗣️ User said:', event.transcript);
+            console.log('🔍 About to call handleUserTranscript...');
             
             // Check if this should trigger a function call
             const text = event.transcript.toLowerCase();
@@ -653,6 +680,7 @@ export const useVoiceConversation = () => {
             }
             
             handleUserTranscript(event.transcript);
+            console.log('✅ handleUserTranscript completed');
           }
           break;
 
@@ -690,6 +718,10 @@ export const useVoiceConversation = () => {
 
         default:
           console.log('📨 Unhandled OpenAI event:', event.type, event);
+          // Check if this is a response-related event we might be missing
+          if (event.type.includes('response') || event.type.includes('audio')) {
+            console.log('🚨 POTENTIALLY MISSED RESPONSE EVENT:', event.type, event);
+          }
       }
     } catch (error) {
       console.error('💥 Error handling realtime event:', error);
