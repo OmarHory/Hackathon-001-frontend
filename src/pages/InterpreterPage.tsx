@@ -331,26 +331,41 @@ const InterpreterPage: React.FC = () => {
             borderRadius: '10px',
             marginBottom: '15px'
           }}>
-            <div style={{ marginBottom: '10px' }}>
-              <strong style={{ color: '#87CEEB' }}>Patient Concerns:</strong>
+            <div style={{ marginBottom: '15px' }}>
+              <strong style={{ color: '#87CEEB' }}>📋 Summary:</strong>
               <br />
-              {sessionSummary.patient_concerns}
+              <p style={{ marginTop: '5px', lineHeight: '1.4' }}>{sessionSummary.summary_text}</p>
             </div>
-            <div style={{ marginBottom: '10px' }}>
-              <strong style={{ color: '#87CEEB' }}>Medical Actions:</strong>
-              <br />
-              {sessionSummary.medical_actions}
-            </div>
-            <div style={{ marginBottom: '10px' }}>
-              <strong style={{ color: '#87CEEB' }}>Follow-up Required:</strong>
-              <br />
-              {sessionSummary.follow_up_required ? 'Yes' : 'No'}
-            </div>
-            {sessionSummary.additional_notes && (
-              <div>
-                <strong style={{ color: '#87CEEB' }}>Additional Notes:</strong>
+            
+            {sessionSummary.key_points && sessionSummary.key_points.length > 0 && (
+              <div style={{ marginBottom: '15px' }}>
+                <strong style={{ color: '#87CEEB' }}>🔍 Key Points:</strong>
+                <ul style={{ marginTop: '5px', marginLeft: '20px' }}>
+                  {sessionSummary.key_points.map((point: string, index: number) => (
+                    <li key={index} style={{ marginBottom: '3px' }}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {sessionSummary.action_items && sessionSummary.action_items.length > 0 && (
+              <div style={{ marginBottom: '15px' }}>
+                <strong style={{ color: '#87CEEB' }}>✅ Action Items:</strong>
+                <ul style={{ marginTop: '5px', marginLeft: '20px' }}>
+                  {sessionSummary.action_items.map((item: string, index: number) => (
+                    <li key={index} style={{ marginBottom: '3px' }}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {sessionSummary.topics && sessionSummary.topics.length > 0 && (
+              <div style={{ marginBottom: '10px' }}>
+                <strong style={{ color: '#87CEEB' }}>🏷️ Topics:</strong>
                 <br />
-                {sessionSummary.additional_notes}
+                <span style={{ marginTop: '5px', display: 'inline-block' }}>
+                  {sessionSummary.topics.join(' • ')}
+                </span>
               </div>
             )}
           </div>

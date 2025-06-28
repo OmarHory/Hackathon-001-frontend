@@ -48,18 +48,36 @@ export const fetchConversationDetails = createAsyncThunk(
 
 export const saveMessage = createAsyncThunk(
   'conversation/saveMessage',
-  async ({ sessionId, messageType, content }: { 
+  async ({ 
+    sessionId, 
+    messageType, 
+    content, 
+    audioDuration, 
+    confidenceScore 
+  }: { 
     sessionId: string; 
     messageType: 'user' | 'assistant' | 'system'; 
-    content: string 
+    content: string;
+    audioDuration?: number;
+    confidenceScore?: number;
   }) => {
+    const requestBody: any = {
+      message_type: messageType,
+      content: content
+    };
+    
+    // Add optional fields if provided (as per API doc)
+    if (audioDuration !== undefined) {
+      requestBody.audio_duration = audioDuration;
+    }
+    if (confidenceScore !== undefined) {
+      requestBody.confidence_score = confidenceScore;
+    }
+    
     const response = await fetch(`${process.env.REACT_APP_API_URL}/conversations/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message_type: messageType,
-        content: content
-      })
+      body: JSON.stringify(requestBody)
     });
     if (!response.ok) {
       throw new Error('Failed to save message');
