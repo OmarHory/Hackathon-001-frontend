@@ -201,7 +201,11 @@ const conversationSlice = createSlice({
       })
       // Save message
       .addCase(saveMessage.fulfilled, (state, action) => {
-        // Message saved successfully, could update state if needed
+        // Update message count in current session when message is saved
+        if (state.currentSession) {
+          state.currentSession.total_messages = (state.currentSession.total_messages || 0) + 1;
+          console.log('📊 Updated session message count:', state.currentSession.total_messages);
+        }
       })
       .addCase(saveMessage.rejected, (state, action) => {
         console.error('Failed to save message:', action.error.message);

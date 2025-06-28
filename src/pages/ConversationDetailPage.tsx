@@ -231,7 +231,9 @@ const ConversationDetailPage: React.FC = () => {
         
         <MetaItem>
           <h4>💬 Total Messages</h4>
-          <p>{conversationDetails.session ? conversationDetails.session.total_messages : 0} exchanges</p>
+          <p>{conversationDetails.session ? 
+            (conversationDetails.session.total_messages || 
+             (conversationDetails.messages?.length || 0)) : 0} exchanges</p>
         </MetaItem>
         
         <MetaItem>
