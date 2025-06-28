@@ -189,7 +189,7 @@ const InterpreterPage: React.FC = () => {
   const sessionSummary = useAppSelector((state) => (state.conversation as any)?.selectedConversation?.summary);
 
   // Determine button state more accurately
-  const isConnecting = connectionState !== 'new' && !isConnected;
+  const isConnecting = connectionState === 'connecting' || (connectionState !== 'new' && connectionState !== 'failed' && !isConnected);
   const buttonDisabled = isConnected || isConnecting;
 
   return (
@@ -269,7 +269,7 @@ const InterpreterPage: React.FC = () => {
             disabled={buttonDisabled}
             style={{ minWidth: '200px' }}
           >
-            {isConnecting ? '🔄 Connecting...' : '🎙️ Start Medical Interpretation'}
+            {isConnecting ? '⏳ Please wait a moment...' : '🎙️ Start Medical Interpretation'}
           </Button>
           
           <Button

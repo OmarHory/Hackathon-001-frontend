@@ -392,6 +392,21 @@ export const useVoiceConversation = () => {
         console.warn('Failed to save medical action message:', error);
       });
       
+      // Update the medical action pair to show completion IMMEDIATELY
+      // Find the most recent translation pair and update it with "Done"
+      if (currentPairRef.current) {
+        console.log('✅ Updating medical action pair to show completion');
+        dispatch(updateTranslationPair({
+          id: currentPairRef.current,
+          translatedText: 'Done',
+          isComplete: true
+        }));
+        
+        // Clear the current pair reference since it's now complete
+        currentPairRef.current = null;
+        assistantTranscriptRef.current = '';
+      }
+      
       // Send function result back to OpenAI
       const functionOutput = {
         type: "conversation.item.create",
@@ -404,7 +419,7 @@ export const useVoiceConversation = () => {
       
       webrtcService.sendMessage(functionOutput);
       
-      // Request "Done" response
+      // Request "Done" response for audio output
       const responseRequest = {
         type: "response.create",
         response: {
@@ -414,6 +429,12 @@ export const useVoiceConversation = () => {
       };
       
       webrtcService.sendMessage(responseRequest);
+      
+      // Update status to show medical action completed
+      dispatch(updateVoiceStatus({ 
+        status: '✅ Medical action completed! Ready for next speaker...', 
+        isListening: false 
+      }));
       
       // Auto-generate summary after medical action (without ending conversation) - as per API doc
       setTimeout(async () => {
@@ -464,6 +485,24 @@ export const useVoiceConversation = () => {
     }
   }, [dispatch, connection, currentSession, generateSummaryOnly]);
 
+  // Detect if transcript contains medical action keywords
+  const detectMedicalAction = useCallback((transcript: string) => {
+    const text = transcript.toLowerCase().trim();
+    
+    // Lab order keywords
+    const labKeywords = ['send lab order', 'order tests', 'get labs', 'blood work', 'run tests', 'lab order'];
+    const hasLabOrder = labKeywords.some(keyword => text.includes(keyword));
+    
+    // Appointment keywords  
+    const appointmentKeywords = ['schedule follow-up', 'follow-up appointment', 'next appointment', 'come back in', 'see you again', 'schedule appointment'];
+    const hasAppointment = appointmentKeywords.some(keyword => text.includes(keyword));
+    
+    return {
+      isMedicalAction: hasLabOrder || hasAppointment,
+      actionType: hasLabOrder ? 'lab-order' : hasAppointment ? 'appointment' : null
+    };
+  }, []);
+
   // Handle user transcript (speech recognition result) with error handling
   const handleUserTranscript = useCallback((transcript: string) => {
     try {
@@ -471,7 +510,7 @@ export const useVoiceConversation = () => {
       dispatch(detectIntent(transcript));
       dispatch(showIntent());
 
-      // Check for repeat requests
+      // Check for repeat requests first
       const text = transcript.toLowerCase().trim();
       const repeatKeywords = ['repeat that', 'repeat', 'say again', 'repite eso', 'repite', 'otra vez', 'repítelo', 'dilo otra vez'];
       const isRepeatRequest = repeatKeywords.some(keyword => text.includes(keyword));
@@ -511,7 +550,29 @@ export const useVoiceConversation = () => {
         return;
       }
 
-      // Create new translation pair for regular speech
+      // Check for medical actions BEFORE creating translation pairs
+      const medicalAction = detectMedicalAction(transcript);
+      
+      if (medicalAction.isMedicalAction) {
+        console.log('🎯 MEDICAL ACTION DETECTED:', medicalAction.actionType);
+        console.log('🎯 Action phrase:', transcript);
+        
+        // Create a special medical action pair instead of translation pair
+        const actionIcon = medicalAction.actionType === 'lab-order' ? '🧪' : '📅';
+        const actionLabel = medicalAction.actionType === 'lab-order' ? 'Processing Lab Order' : 'Scheduling Appointment';
+        
+        createTranslationPair(transcript, `${actionIcon} ${actionLabel}...`, 'English', 'English');
+        
+        dispatch(updateVoiceStatus({ 
+          status: `${actionIcon} Processing medical action...` 
+        }));
+        
+        // Let OpenAI handle the function call - don't interfere with translation logic
+        dispatch(setPendingUserMessage(false));
+        return;
+      }
+
+      // Create new translation pair for regular speech only if NOT a medical action
       const isSpanish = detectLanguage(transcript);
       const originalLang = isSpanish ? 'Spanish' : 'English';
       const translatedLang = isSpanish ? 'English' : 'Spanish';
@@ -556,7 +617,7 @@ export const useVoiceConversation = () => {
     } catch (error) {
       handleTranslationError(error);
     }
-  }, [dispatch, lastTranslation, connection, createTranslationPair, detectLanguage, processMessageQueue]);
+  }, [dispatch, lastTranslation, connection, createTranslationPair, detectLanguage, processMessageQueue, detectMedicalAction]);
 
   // Handle real-time events from OpenAI with comprehensive error handling
   const handleRealtimeEvent = useCallback((event: RealtimeEvent) => {
@@ -717,20 +778,38 @@ export const useVoiceConversation = () => {
           if (event.transcript && event.transcript.trim()) {
             const finalTranscript = event.transcript.trim();
             console.log('📝 Processing final transcript:', finalTranscript);
-            dispatch(setLastTranslation(finalTranscript));
-            finalizeAssistantTranscript(finalTranscript);
             
-            // Clear emergency timeout and update status
-            clearEmergencyTimeout();
+            // Check if this is a "Done" response from a medical action
+            if (finalTranscript.toLowerCase() === 'done' && !currentPairRef.current) {
+              console.log('🎯 Detected "Done" response from medical action - already handled, ignoring');
+              // Medical action already completed in handleFunctionCall, don't process this
+              clearEmergencyTimeout();
+              updateVoiceStatusWithTracking({ 
+                status: '🎤 Ready for medical interpretation...', 
+                isListening: false 
+              });
+              return;
+            }
             
-            // Reset current pair reference
-            currentPairRef.current = null;
-            assistantTranscriptRef.current = '';
-            
-            updateVoiceStatusWithTracking({ 
-              status: '✅ Translation complete! Ready for next speaker...', 
-              isListening: false 
-            });
+            // Process normal translations
+            if (currentPairRef.current) {
+              dispatch(setLastTranslation(finalTranscript));
+              finalizeAssistantTranscript(finalTranscript);
+              
+              // Clear emergency timeout and update status
+              clearEmergencyTimeout();
+              
+              // Reset current pair reference
+              currentPairRef.current = null;
+              assistantTranscriptRef.current = '';
+              
+              updateVoiceStatusWithTracking({ 
+                status: '✅ Translation complete! Ready for next speaker...', 
+                isListening: false 
+              });
+            } else {
+              console.log('⚠️ No current translation pair to update');
+            }
           } else {
             console.log('⚠️ Empty or missing transcript in audio_transcript.done event');
             console.log('🔍 Trying to use accumulated transcript:', assistantTranscriptRef.current);
@@ -993,21 +1072,38 @@ export const useVoiceConversation = () => {
         return;
       }
 
+      // IMMEDIATELY set connecting state for button feedback
+      dispatch(setConnection({ 
+        sessionId: null, 
+        isConnected: false, 
+        connectionState: 'connecting' 
+      }));
+      
       dispatch(resetVoiceState());
-      dispatch(updateVoiceStatus({ status: '🎙️ Getting microphone access...' }));
+      dispatch(updateVoiceStatus({ 
+        status: '⏳ Please wait a moment - connecting to medical interpreter...' 
+      }));
       
       // Set up event handlers
       webrtcService.onEvent(handleRealtimeEvent);
       webrtcService.onConnectionStateChange((state) => {
-        dispatch(updateVoiceStatus({ status: `🔗 Connection: ${state}` }));
-        if (state === 'connected') {
+        console.log('🔗 Connection state changed to:', state);
+        
+        // Update connection state in Redux
+        dispatch(setConnection({ connectionState: state }));
+        
+        // Provide user-friendly status messages
+        if (state === 'connecting') {
+          dispatch(updateVoiceStatus({ status: '🔄 Establishing secure connection...' }));
+        } else if (state === 'connected') {
           dispatch(setConnected(true));
           dispatch(updateVoiceStatus({ 
-            status: '✅ Connected to Medical Interpreter! Start speaking!', 
+            status: '✅ Connected! Ready for medical interpretation...', 
             isError: false 
           }));
           dispatch(showIntent());
         } else if (state === 'failed') {
+          dispatch(setConnection({ connectionState: 'failed' }));
           const errorDetails = handleWebRTCError(new Error('WebRTC connection failed'));
           dispatch(updateVoiceStatus({ 
             status: errorDetails.userMessage, 
@@ -1016,6 +1112,11 @@ export const useVoiceConversation = () => {
           dispatch(setConnected(false));
         }
       });
+      
+      // Update status for microphone access
+      dispatch(updateVoiceStatus({ 
+        status: '🎤 Requesting microphone access - please allow when prompted...' 
+      }));
       
       // Start WebRTC connection
       const connectionResult = await webrtcService.startConnection();
@@ -1063,6 +1164,13 @@ export const useVoiceConversation = () => {
       }
       
     } catch (error) {
+      // Reset connection state on error
+      dispatch(setConnection({ 
+        sessionId: null, 
+        isConnected: false, 
+        connectionState: 'failed' 
+      }));
+      
       const errorDetails = handleWebRTCError(error);
       dispatch(updateVoiceStatus({ 
         status: errorDetails.userMessage, 
