@@ -16,8 +16,8 @@ const isSafari = (): boolean => {
 
 // Check if HTTPS is required and available
 const checkHTTPS = (): { isSecure: boolean; requiresHTTPS: boolean } => {
-  const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  const requiresHTTPS = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+  const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const requiresHTTPS = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
   return { isSecure, requiresHTTPS };
 };
 
