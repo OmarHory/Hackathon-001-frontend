@@ -145,18 +145,19 @@ const conversationSlice = createSlice({
     addMessage: (state, action: PayloadAction<Message>) => {
       state.currentMessages.push(action.payload);
     },
-    addTranslationPair: (state, action: PayloadAction<Omit<TranslationPair, 'id'>>) => {
-      const newPair: TranslationPair = {
-        ...action.payload,
-        id: Date.now().toString(),
-      };
-      state.translationPairs.unshift(newPair); // Add to beginning for latest first
+    addTranslationPair: (state, action: PayloadAction<TranslationPair>) => {
+      state.translationPairs.unshift(action.payload); // Add to beginning for latest first
     },
-    updateTranslationPair: (state, action: PayloadAction<{ id: string; translatedText: string }>) => {
+    updateTranslationPair: (state, action: PayloadAction<{ id: string; translatedText: string; isComplete?: boolean }>) => {
       const pair = state.translationPairs.find(p => p.id === action.payload.id);
       if (pair) {
         pair.translatedText = action.payload.translatedText;
-        pair.isComplete = true;
+        if (action.payload.isComplete !== undefined) {
+          pair.isComplete = action.payload.isComplete;
+        }
+        console.log('📝 Updated translation pair:', pair.id, 'complete:', pair.isComplete, 'text:', pair.translatedText.slice(0, 30) + '...');
+      } else {
+        console.warn('⚠️ Translation pair not found for ID:', action.payload.id);
       }
     },
     clearCurrentSession: (state) => {

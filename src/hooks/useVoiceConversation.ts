@@ -52,8 +52,6 @@ export const useVoiceConversation = () => {
   const currentPairRef = useRef<string | null>(null);
   const assistantTranscriptRef = useRef<string>('');
   const translationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const periodicCheckRef = useRef<NodeJS.Timeout | null>(null);
-  const lastStatusChangeRef = useRef<number>(Date.now());
 
   // Check browser compatibility on hook initialization
   const checkBrowserSupport = useCallback(() => {
@@ -72,73 +70,53 @@ export const useVoiceConversation = () => {
     return true;
   }, [dispatch]);
 
-  // Periodic check to prevent permanent stuck states
-  const startPeriodicStuckCheck = useCallback(() => {
-    // Clear any existing check
-    if (periodicCheckRef.current) {
-      clearInterval(periodicCheckRef.current);
+  // Simplified emergency timeout - only trigger in truly stuck states
+  const startEmergencyTimeout = useCallback(() => {
+    // Only set timeout if we don't already have one
+    if (translationTimeoutRef.current) {
+      clearTimeout(translationTimeoutRef.current);
     }
     
-    periodicCheckRef.current = setInterval(() => {
-      const now = Date.now();
-      const currentStatus = voiceState?.currentStatus || '';
+    translationTimeoutRef.current = setTimeout(() => {
+      console.log('🚨 EMERGENCY TIMEOUT: Translation completely stuck, forcing recovery');
       
-      // Check if we've been in a "processing" state for too long
-      if (currentStatus.includes('Processing') || currentStatus.includes('Generating') || currentStatus.includes('Translating')) {
-        const timeSinceLastChange = now - lastStatusChangeRef.current;
-        
-        if (timeSinceLastChange > 8000) { // 8 seconds stuck in processing state
-          console.log('🚨 PERIODIC CHECK: Detected stuck state!', {
-            status: currentStatus,
-            timeSinceLastChange: timeSinceLastChange,
-            currentPair: currentPairRef.current,
-            assistantText: assistantTranscriptRef.current
-          });
-          
-          // Force complete any stuck translation
-          if (currentPairRef.current) {
-            const fallbackText = assistantTranscriptRef.current || 'Translation interrupted - please try again';
-            dispatch(updateTranslationPair({
-              id: currentPairRef.current,
-              translatedText: fallbackText
-            }));
-          }
-          
-          // Reset everything
-          currentPairRef.current = null;
-          assistantTranscriptRef.current = '';
-          dispatch(setPendingUserMessage(false));
-          dispatch(clearMessageQueue());
-          
-          dispatch(updateVoiceStatus({ 
-            status: '🔄 Recovered from stuck state! Ready for next speaker...', 
-            isListening: false 
-          }));
-          
-          // Update last change time
-          lastStatusChangeRef.current = now;
-        }
-      } else {
-        // Update last change time for non-processing states
-        lastStatusChangeRef.current = now;
+      // Only trigger if we actually have a stuck translation pair
+      if (currentPairRef.current) {
+        const fallbackText = assistantTranscriptRef.current || 'Translation timeout';
+        console.log('🔧 Force completing with fallback:', fallbackText);
+        dispatch(updateTranslationPair({
+          id: currentPairRef.current,
+          translatedText: fallbackText
+        }));
       }
-    }, 2000); // Check every 2 seconds
-  }, [dispatch, voiceState]);
+      
+      // Reset state
+      currentPairRef.current = null;
+      assistantTranscriptRef.current = '';
+      dispatch(setPendingUserMessage(false));
+      dispatch(clearMessageQueue());
+      
+      dispatch(updateVoiceStatus({ 
+        status: '🎤 Ready for medical interpretation...', 
+        isListening: false 
+      }));
+      
+    }, 8000); // Only trigger after 8 seconds of total silence
+  }, [dispatch]);
 
-  const stopPeriodicStuckCheck = useCallback(() => {
-    if (periodicCheckRef.current) {
-      clearInterval(periodicCheckRef.current);
-      periodicCheckRef.current = null;
+  const clearEmergencyTimeout = useCallback(() => {
+    if (translationTimeoutRef.current) {
+      clearTimeout(translationTimeoutRef.current);
+      translationTimeoutRef.current = null;
     }
   }, []);
 
-  // Enhanced status update that tracks timing
+  // Enhanced status update 
   const updateVoiceStatusWithTracking = useCallback((payload: { 
     status: string; 
     isError?: boolean; 
     isListening?: boolean 
   }) => {
-    lastStatusChangeRef.current = Date.now();
     dispatch(updateVoiceStatus(payload));
   }, [dispatch]);
 
@@ -148,7 +126,10 @@ export const useVoiceConversation = () => {
       const pairId = Date.now().toString();
       currentPairRef.current = pairId;
       
+      console.log('🆔 Creating translation pair with ID:', pairId);
+      
       dispatch(addTranslationPair({
+        id: pairId, // Pass the same ID that we store in currentPairRef
         originalText,
         translatedText,
         originalLang,
@@ -167,10 +148,14 @@ export const useVoiceConversation = () => {
       assistantTranscriptRef.current += delta;
       
       if (currentPairRef.current) {
+        console.log('🔄 Updating translation pair ID:', currentPairRef.current, 'with text:', assistantTranscriptRef.current.slice(0, 50) + '...');
         dispatch(updateTranslationPair({
           id: currentPairRef.current,
-          translatedText: assistantTranscriptRef.current
+          translatedText: assistantTranscriptRef.current,
+          isComplete: false
         }));
+      } else {
+        console.warn('⚠️ No currentPairRef.current available for update');
       }
     } catch (error) {
       handleTranslationError(error);
@@ -181,10 +166,14 @@ export const useVoiceConversation = () => {
   const finalizeAssistantTranscript = useCallback((finalText: string) => {
     try {
       if (currentPairRef.current) {
+        console.log('✅ Finalizing translation pair ID:', currentPairRef.current, 'with final text:', finalText);
         dispatch(updateTranslationPair({
           id: currentPairRef.current,
-          translatedText: finalText
+          translatedText: finalText,
+          isComplete: true
         }));
+      } else {
+        console.warn('⚠️ No currentPairRef.current available for finalization');
       }
 
       // Save assistant message to database (as per API doc) - Enhanced session ID lookup
@@ -579,16 +568,6 @@ export const useVoiceConversation = () => {
             status: '🔄 Processing and translating...', 
             isListening: false 
           });
-          
-          // Set a shorter timeout right after speech stops as additional failsafe
-          setTimeout(() => {
-            console.log('⚡ Speech-stopped failsafe: checking if still translating...');
-            // Force complete if we're still stuck on "Processing and translating..."
-            dispatch(updateVoiceStatus({ 
-              status: '🎤 Ready for medical interpretation...', 
-              isListening: false 
-            }));
-          }, 3000); // 3 second failsafe after speech stops
           break;
 
         case 'input_audio_buffer.committed':
@@ -606,46 +585,8 @@ export const useVoiceConversation = () => {
             isListening: false 
           });
           
-          // Set failsafe timeout to prevent getting stuck on "Translating..."
-          if (translationTimeoutRef.current) {
-            clearTimeout(translationTimeoutRef.current);
-          }
-          translationTimeoutRef.current = setTimeout(() => {
-            console.log('⏰ AGGRESSIVE TIMEOUT: Forcing complete stuck translation');
-            console.log('⏰ Current pair ref:', currentPairRef.current);
-            console.log('⏰ Assistant transcript:', assistantTranscriptRef.current);
-            
-            // Force complete any stuck translation pair with aggressive cleanup
-            if (currentPairRef.current) {
-              const fallbackText = assistantTranscriptRef.current || 'Translation timeout - please try again';
-              console.log('🔧 Force completing stuck translation pair with fallback text:', fallbackText);
-              dispatch(updateTranslationPair({
-                id: currentPairRef.current,
-                translatedText: fallbackText
-              }));
-            }
-            
-            // Aggressive state reset
-            currentPairRef.current = null;
-            assistantTranscriptRef.current = '';
-            dispatch(setPendingUserMessage(false));
-            dispatch(clearMessageQueue());
-            
-            // Clear ready state
-            dispatch(updateVoiceStatus({ 
-              status: '⚡ Timeout recovered! Ready for next speaker...', 
-              isListening: false 
-            }));
-            
-            // Double-check status after a brief delay
-            setTimeout(() => {
-              dispatch(updateVoiceStatus({ 
-                status: '🎤 Ready for medical interpretation...', 
-                isListening: false 
-              }));
-            }, 1000);
-            
-          }, 5000); // Reduced to 5 second timeout for faster recovery
+          // Start emergency timeout only if needed
+          startEmergencyTimeout();
           break;
 
         case 'response.output_item.added':
@@ -659,13 +600,8 @@ export const useVoiceConversation = () => {
         case 'response.audio_transcript.delta':
           console.log('🔤 Audio transcript delta:', event.delta);
           if (event.delta && event.delta.trim()) {
-            if (pendingUserMessage) {
-              console.log('📋 Queuing delta for pending user message');
-              dispatch(addToMessageQueue({ type: 'delta', content: event.delta }));
-            } else {
-              console.log('📝 Updating assistant transcript with delta');
-              updateAssistantTranscript(event.delta);
-            }
+            console.log('📝 Updating assistant transcript with delta');
+            updateAssistantTranscript(event.delta);
           }
           break;
 
@@ -673,55 +609,31 @@ export const useVoiceConversation = () => {
           console.log('✅ Audio transcript completed:', event.transcript);
           if (event.transcript && event.transcript.trim()) {
             dispatch(setLastTranslation(event.transcript.trim()));
-            
-            if (pendingUserMessage) {
-              console.log('📋 Queuing final transcript for pending user message');
-              dispatch(addToMessageQueue({ type: 'final', content: event.transcript }));
-            } else {
-              console.log('✅ Finalizing assistant transcript');
-              finalizeAssistantTranscript(event.transcript);
-            }
+            console.log('✅ Finalizing assistant transcript');
+            finalizeAssistantTranscript(event.transcript);
           }
           
-          // FORCE status update to prevent getting stuck
+          // Clear emergency timeout and update status
+          clearEmergencyTimeout();
           updateVoiceStatusWithTracking({ 
             status: '✅ Translation complete! Ready for next speaker...', 
             isListening: false 
           });
-          
-          // Clear the failsafe timeout since we completed successfully
-          if (translationTimeoutRef.current) {
-            clearTimeout(translationTimeoutRef.current);
-            translationTimeoutRef.current = null;
-          }
           break;
 
         case 'response.done':
           console.log('🏁 OpenAI response completed');
           
-          // ENSURE we clear any stuck states
-          dispatch(updateVoiceStatus({ 
-            status: '✅ Ready for next speaker! 🎤', 
-            isListening: false 
-          }));
+          // Clear any emergency timeouts and ensure ready state
+          clearEmergencyTimeout();
           dispatch(setPendingUserMessage(false));
           assistantTranscriptRef.current = '';
           
-          // Process any queued messages with a slight delay
-          setTimeout(() => {
-            processMessageQueue();
-            // Double-check we're in ready state
-            dispatch(updateVoiceStatus({ 
-              status: '🎤 Ready for medical interpretation...', 
-              isListening: false 
-            }));
-          }, 200);
-          
-          // Clear the failsafe timeout since response is done
-          if (translationTimeoutRef.current) {
-            clearTimeout(translationTimeoutRef.current);
-            translationTimeoutRef.current = null;
-          }
+          // Set ready state
+          dispatch(updateVoiceStatus({ 
+            status: '🎤 Ready for medical interpretation...', 
+            isListening: false 
+          }));
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
@@ -840,8 +752,8 @@ export const useVoiceConversation = () => {
         translationTimeoutRef.current = null;
       }
       
-      // Stop the periodic stuck check
-      stopPeriodicStuckCheck();
+      // Clear any emergency timeout
+      clearEmergencyTimeout();
       
       dispatch(updateVoiceStatus({ status: 'Session ended! Summary saved to history. 📋' }));
       
@@ -906,8 +818,8 @@ export const useVoiceConversation = () => {
       console.log('💾 Storing connection in Redux:', serializableConnection);
       dispatch(setConnection(serializableConnection));
       
-      // Start the periodic stuck check
-      startPeriodicStuckCheck();
+      // Emergency timeout will be started per response
+      console.log('🛡️ Anti-stuck system ready');
       
       // Create session if we have a session ID
       if (connectionResult.sessionId) {
