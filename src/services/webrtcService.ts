@@ -1,4 +1,5 @@
 import { WebRTCConnection, RealtimeEvent } from '../types';
+import { webrtcAPI } from './apiService';
 
 export class WebRTCService {
   private connection: WebRTCConnection = {
@@ -64,34 +65,24 @@ export class WebRTCService {
       await this.waitForICEGathering();
       console.log('✅ ICE gathering complete');
 
-      // Step 9: Send offer to backend
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/rtc-connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/sdp' },
-        body: this.connection.peerConnection.localDescription!.sdp
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server error: ${response.status} - ${errorText}`);
-      }
-
-      // Step 10: Get session ID and SDP answer
-      this.connection.sessionId = response.headers.get('X-Session-ID');
-      const answerSdp = await response.text();
+      // Step 9: Send offer to backend using API service
+      const rtcResult = await webrtcAPI.connect(this.connection.peerConnection.localDescription!.sdp);
+      
+      this.connection.sessionId = rtcResult.sessionId;
+      const answerSdp = rtcResult.sdpAnswer;
 
       if (!answerSdp || answerSdp.length < 50) {
         throw new Error('Invalid SDP answer received from server');
       }
 
-      // Step 11: Set remote description
+      // Step 10: Set remote description
       await this.connection.peerConnection.setRemoteDescription({
         type: 'answer',
         sdp: answerSdp
       });
       console.log('✅ Set remote description');
 
-      // Step 12: Wait for connection to be established
+      // Step 11: Wait for connection to be established
       await this.waitForConnectionState('connected');
       console.log('✅ WebRTC connection established!');
 
@@ -107,19 +98,19 @@ export class WebRTCService {
     if (!this.connection.dataChannel) return;
 
     this.connection.dataChannel.addEventListener('open', () => {
-      console.log('🔗 Data channel opened');
+      console.log('🔗 Data channel opened - configuring session...');
       this.configureSession();
     });
 
     this.connection.dataChannel.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(event.data);
-        console.log('📨 Received event:', message.type);
+        console.log('📨 Received OpenAI event:', message.type, message);
         if (this.onEventCallback) {
           this.onEventCallback(message);
         }
       } catch (error) {
-        console.error('❌ Error parsing message:', error);
+        console.error('❌ Error parsing OpenAI message:', error);
       }
     });
 
@@ -134,8 +125,11 @@ export class WebRTCService {
 
   private configureSession(): void {
     if (!this.connection.dataChannel || this.connection.dataChannel.readyState !== 'open') {
+      console.log('⚠️ Data channel not ready for session configuration');
       return;
     }
+
+    console.log('⚙️ Configuring OpenAI Realtime session...');
 
     const sessionConfig = {
       type: "session.update",
@@ -211,8 +205,57 @@ You are professional, accurate, and help ensure clear medical communication betw
       }
     };
 
+    console.log('📤 Sending session configuration:', sessionConfig);
     this.connection.dataChannel.send(JSON.stringify(sessionConfig));
-    console.log('⚙️ Session configured for medical interpretation');
+    console.log('✅ Session configuration sent to OpenAI');
+    
+    // Monitor audio input levels
+    this.setupAudioMonitoring();
+    
+    // Send a test message to ensure connection is working
+    setTimeout(() => {
+      console.log('🧪 Testing connection with greeting...');
+      const greetingMessage = {
+        type: "response.create",
+        response: {
+          modalities: ["text", "audio"],
+          instructions: "Say 'Medical interpreter ready. Please start speaking.' to confirm the connection is working."
+        }
+      };
+      this.connection.dataChannel?.send(JSON.stringify(greetingMessage));
+    }, 2000);
+  }
+
+  private setupAudioMonitoring(): void {
+    if (!this.connection.localStream) return;
+    
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const microphone = audioContext.createMediaStreamSource(this.connection.localStream);
+      
+      analyser.fftSize = 256;
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      
+      microphone.connect(analyser);
+      
+      const checkAudioLevel = () => {
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+        
+        if (average > 10) { // Threshold for audio detection
+          console.log('🎤 Audio input detected, level:', Math.round(average));
+        }
+        
+        setTimeout(checkAudioLevel, 1000); // Check every second
+      };
+      
+      checkAudioLevel();
+      console.log('🎤 Audio monitoring setup complete');
+    } catch (error) {
+      console.warn('⚠️ Could not setup audio monitoring:', error);
+    }
   }
 
   private createAudioElement(stream: MediaStream): void {
