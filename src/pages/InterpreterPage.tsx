@@ -71,39 +71,7 @@ const ButtonGroup = styled.div`
   }
 `;
 
-const InstructionsSection = styled(Container)`
-  margin-bottom: 30px;
-  padding: 25px;
-`;
 
-const InstructionsTitle = styled.h3`
-  color: ${theme.colors.primary};
-  margin-bottom: 15px;
-  font-size: 1.4rem;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-`;
-
-const InstructionsList = styled.ul`
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  
-  li {
-    padding: 8px 0;
-    color: ${theme.colors.text};
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    
-    &:before {
-      content: '▶';
-      color: ${theme.colors.secondary};
-      font-size: 0.8rem;
-    }
-  }
-`;
 
 const TranslationsSection = styled(Container)`
   margin-bottom: 30px;
@@ -175,54 +143,7 @@ const InterpreterPage: React.FC = () => {
   // Get current session summary
   const sessionSummary = useAppSelector((state) => (state.conversation as any)?.selectedConversation?.summary);
 
-  // Audio test functionality
-  const testMicrophone = async () => {
-    try {
-      console.log('🎤 Testing microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      // Create audio context and analyser
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      const microphone = audioContext.createMediaStreamSource(stream);
-      
-      analyser.fftSize = 256;
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      
-      microphone.connect(analyser);
-      
-      let testCount = 0;
-      const maxTests = 20; // Test for 10 seconds
-      
-      const testAudioLevel = () => {
-        analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-        
-        console.log(`🎤 Audio test ${testCount + 1}/${maxTests}: Level = ${Math.round(average)}`);
-        
-        if (average > 20) {
-          console.log('✅ Audio input detected! Microphone is working.');
-        }
-        
-        testCount++;
-        if (testCount < maxTests) {
-          setTimeout(testAudioLevel, 500);
-        } else {
-          console.log('🎤 Audio test completed. Check console for results.');
-          stream.getTracks().forEach(track => track.stop());
-          audioContext.close();
-        }
-      };
-      
-      console.log('🎤 Audio test started. Speak into your microphone...');
-      testAudioLevel();
-      
-    } catch (error) {
-      console.error('❌ Microphone test failed:', error);
-      alert('Microphone test failed. Please check permissions and try again.');
-    }
-  };
+
 
   return (
     <InterpreterPageContainer>
@@ -264,15 +185,6 @@ const InterpreterPage: React.FC = () => {
             style={{ minWidth: '200px' }}
           >
             🛑 Stop & Save Session
-          </Button>
-
-          <Button
-            variant="secondary"
-            onClick={testMicrophone}
-            disabled={isConnected}
-            style={{ minWidth: '200px' }}
-          >
-            🧪 Test Microphone
           </Button>
         </ButtonGroup>
       </ControlsSection>
@@ -349,23 +261,7 @@ const InterpreterPage: React.FC = () => {
         </Container>
       )}
 
-      <InstructionsSection>
-        <InstructionsTitle>
-          📋 Testing Instructions
-        </InstructionsTitle>
-        <InstructionsList>
-          <li><strong>Step 1:</strong> Click "Test Microphone" first to verify audio is working</li>
-          <li><strong>Step 2:</strong> Click "Start Medical Interpretation" and allow microphone access</li>
-          <li><strong>Step 3:</strong> Wait for "Medical interpreter ready" confirmation message</li>
-          <li><strong>Step 4:</strong> Say "Hello" or "Hola" clearly into your microphone</li>
-          <li><strong>Step 5:</strong> Check debug info and browser console for events</li>
-          <li><strong>Step 6:</strong> Look for speech detection and translation events</li>
-          <li><strong>💾 Message Saving:</strong> All "hi", "hello", etc. are automatically saved to database!</li>
-          <li><strong>Testing:</strong> Say "send lab order" to test function calls</li>
-          <li><strong>🔍 Logs:</strong> Open console (F12) to see "💾 Saving user message" and "✅ Message saved" logs</li>
-          <li><strong>Troubleshoot:</strong> If no translation, check network and backend connection</li>
-        </InstructionsList>
-      </InstructionsSection>
+
 
       <TranslationsSection>
         <TranslationsTitle>
