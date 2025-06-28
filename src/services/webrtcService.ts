@@ -66,7 +66,25 @@ export class WebRTCService {
       console.log('✅ ICE gathering complete');
 
       // Step 9: Send offer to backend using API service
-      const rtcResult = await webrtcAPI.connect(this.connection.peerConnection.localDescription!.sdp);
+      const sdpOffer = this.connection.peerConnection.localDescription!.sdp;
+      
+      // Debug logging for SDP
+      console.log('📋 SDP Offer Details:');
+      console.log('   Length:', sdpOffer.length, 'characters');
+      console.log('   ICE gathering state:', this.connection.peerConnection.iceGatheringState);
+      console.log('   First 200 chars:', sdpOffer.substring(0, 200));
+      console.log('   Last 200 chars:', sdpOffer.substring(sdpOffer.length - 200));
+      
+      if (sdpOffer.length < 100) {
+        throw new Error(`SDP offer too short (${sdpOffer.length} chars) - likely incomplete`);
+      }
+      
+      console.log('🌐 Sending SDP offer to backend...');
+      const rtcResult = await webrtcAPI.connect(sdpOffer);
+      console.log('✅ Backend responded successfully:');
+      console.log('   Session ID:', rtcResult.sessionId);
+      console.log('   SDP Answer length:', rtcResult.sdpAnswer?.length || 0);
+      console.log('   SDP Answer preview:', rtcResult.sdpAnswer?.substring(0, 100) || 'No SDP answer');
       
       this.connection.sessionId = rtcResult.sessionId;
       const answerSdp = rtcResult.sdpAnswer;
@@ -282,9 +300,31 @@ You are professional, accurate, and help ensure clear medical communication betw
       return;
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        console.warn('⚠️ ICE gathering timeout - proceeding with current candidates');
+        resolve(); // Don't reject, just proceed with what we have
+      }, 5000); // 5 second timeout
+
+      // Also listen for the event-based completion
+      const handleICEGatheringChange = () => {
+        if (this.connection.peerConnection?.iceGatheringState === 'complete') {
+          clearTimeout(timeout);
+          this.connection.peerConnection.removeEventListener('icegatheringstatechange', handleICEGatheringChange);
+          console.log('✅ ICE gathering completed via event');
+          resolve();
+        }
+      };
+
+      this.connection.peerConnection?.addEventListener('icegatheringstatechange', handleICEGatheringChange);
+
+      // Fallback polling method
       const checkState = () => {
         if (this.connection.peerConnection?.iceGatheringState === 'complete') {
+          clearTimeout(timeout);
+          this.connection.peerConnection.removeEventListener('icegatheringstatechange', handleICEGatheringChange);
+          console.log('✅ ICE gathering completed via polling');
           resolve();
         } else {
           setTimeout(checkState, 100);

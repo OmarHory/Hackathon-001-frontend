@@ -163,6 +163,7 @@ class ApiService {
     sdpAnswer: string;
     sessionId: string;
   }> {
+    console.log('🌐 Frontend sending WebRTC request...');
     const response = await fetch(`${this.baseUrl}/rtc-connect`, {
       method: 'POST',
       headers: {
@@ -171,18 +172,35 @@ class ApiService {
       body: sdpOffer
     });
 
+    console.log('📡 Response received from backend:');
+    console.log('   Status:', response.status, response.statusText);
+    console.log('   Headers:', Object.fromEntries(response.headers.entries()));
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('❌ Backend error response:', errorText);
       throw new Error(`WebRTC connection failed: ${response.status} - ${errorText}`);
     }
 
     const sessionId = response.headers.get('X-Session-ID');
     const sdpAnswer = await response.text();
 
+    console.log('🔍 Parsed response:');
+    console.log('   Session ID:', sessionId);
+    console.log('   SDP Answer length:', sdpAnswer?.length || 0);
+    console.log('   SDP Answer preview:', sdpAnswer?.substring(0, 100));
+
     if (!sessionId) {
+      console.error('❌ No session ID in response headers');
       throw new Error('No session ID received from server');
     }
 
+    if (!sdpAnswer || sdpAnswer.length < 50) {
+      console.error('❌ Invalid SDP answer:', sdpAnswer);
+      throw new Error('Invalid SDP answer received from server');
+    }
+
+    console.log('✅ WebRTC response parsed successfully');
     return {
       sdpAnswer,
       sessionId
