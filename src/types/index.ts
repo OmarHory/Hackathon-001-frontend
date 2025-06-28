@@ -88,6 +88,8 @@ export interface RealtimeEvent {
   type: string;
   session?: any;
   transcript?: string;
+  content?: string;
+  text?: string;
   error?: {
     message: string;
   };
@@ -95,6 +97,24 @@ export interface RealtimeEvent {
   arguments?: string;
   call_id?: string;
   delta?: string;
+  item?: {
+    content?: Array<{
+      transcript?: string;
+      text?: string;
+    }>;
+  };
+  part?: {
+    transcript?: string;
+    text?: string;
+  };
+  response?: {
+    output?: Array<{
+      content?: Array<{
+        transcript?: string;
+        text?: string;
+      }>;
+    }>;
+  };
 }
 
 // UI State Types

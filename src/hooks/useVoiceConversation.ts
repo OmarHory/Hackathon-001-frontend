@@ -77,12 +77,16 @@ export const useVoiceConversation = () => {
       clearTimeout(translationTimeoutRef.current);
     }
     
+    console.log('🛡️ Starting emergency timeout for translation pair:', currentPairRef.current);
+    
     translationTimeoutRef.current = setTimeout(() => {
-      console.log('🚨 EMERGENCY TIMEOUT: Translation stuck, forcing completion');
+      console.log('🚨 EMERGENCY TIMEOUT TRIGGERED: Translation stuck, forcing completion');
+      console.log('🔧 Current pair ref:', currentPairRef.current);
+      console.log('🔧 Assistant transcript:', assistantTranscriptRef.current);
       
       // Force complete any stuck translation pair
       if (currentPairRef.current) {
-        const fallbackText = assistantTranscriptRef.current.trim() || 'Translation timeout - please try again';
+        const fallbackText = assistantTranscriptRef.current.trim() || 'Translation timeout - please speak again';
         console.log('🔧 Force completing with fallback:', fallbackText);
         dispatch(updateTranslationPair({
           id: currentPairRef.current,
@@ -104,7 +108,7 @@ export const useVoiceConversation = () => {
         isListening: false 
       }));
       
-    }, 6000); // 6 seconds timeout
+    }, 4000); // Reduced to 4 seconds for faster recovery
   }, [dispatch]);
 
   const clearEmergencyTimeout = useCallback(() => {
@@ -570,8 +574,9 @@ export const useVoiceConversation = () => {
 
         case 'session.updated':
           console.log('⚙️ OpenAI Session updated:', event);
+          // Silent startup - no greeting message
           dispatch(updateVoiceStatus({ 
-            status: '🎤 Medical interpreter ready! Start speaking...', 
+            status: '🎤 Ready for medical interpretation...', 
             isListening: false 
           }));
           break;
@@ -597,6 +602,10 @@ export const useVoiceConversation = () => {
           console.log('💾 Audio buffer committed to OpenAI');
           break;
 
+        case 'input_audio_buffer.cleared':
+          console.log('🧹 Audio buffer cleared');
+          break;
+
         case 'conversation.item.created':
           console.log('📝 Conversation item created:', event);
           break;
@@ -617,24 +626,84 @@ export const useVoiceConversation = () => {
               console.log('⚠️ No deltas received after 2 seconds, translation may be stuck');
               console.log('🔧 Current pair:', currentPairRef.current);
               console.log('🔧 Current transcript:', assistantTranscriptRef.current);
+              
+              // Trigger faster recovery if no response received
+              console.log('🚨 Triggering fast recovery for stuck translation');
+              dispatch(updateTranslationPair({
+                id: currentPairRef.current,
+                translatedText: 'No response received - please try again',
+                isComplete: true
+              }));
+              
+              // Clean up
+              currentPairRef.current = null;
+              assistantTranscriptRef.current = '';
+              clearEmergencyTimeout();
+              
+              dispatch(updateVoiceStatus({ 
+                status: '🎤 Ready for medical interpretation...', 
+                isListening: false 
+              }));
             }
           }, 2000);
           break;
 
         case 'response.output_item.added':
           console.log('📤 Response output item added:', event);
+          // Sometimes the text is available immediately when output item is added
+          if (event.item && event.item.content && event.item.content.length > 0) {
+            const content = event.item.content[0];
+            const responseText = content.transcript || content.text;
+            if (responseText) {
+              console.log('📝 Found early response text in output item:', responseText);
+              // Update transcript buffer in case other events fail
+              assistantTranscriptRef.current = responseText;
+            }
+          }
+          break;
+
+        case 'response.output_item.done':
+          console.log('✅ Response output item completed:', event);
+          // This is often where the final response content is available
+          if (event.item && event.item.content && event.item.content.length > 0) {
+            const content = event.item.content[0];
+            if (content.transcript) {
+              console.log('📝 Found transcript in output item:', content.transcript);
+              dispatch(setLastTranslation(content.transcript));
+              finalizeAssistantTranscript(content.transcript);
+            } else if (content.text) {
+              console.log('📝 Found text in output item:', content.text);
+              dispatch(setLastTranslation(content.text));
+              finalizeAssistantTranscript(content.text);
+            }
+          }
           break;
 
         case 'response.content_part.added':
           console.log('📝 Response content part added:', event);
           break;
 
+        case 'response.content_part.done':
+          console.log('✅ Response content part completed:', event);
+          // Handle completed content parts
+          if (event.part && event.part.transcript) {
+            console.log('📝 Found transcript in content part:', event.part.transcript);
+            dispatch(setLastTranslation(event.part.transcript));
+            finalizeAssistantTranscript(event.part.transcript);
+          } else if (event.part && event.part.text) {
+            console.log('📝 Found text in content part:', event.part.text);
+            dispatch(setLastTranslation(event.part.text));
+            finalizeAssistantTranscript(event.part.text);
+          }
+          break;
+
         case 'response.audio_transcript.delta':
           console.log('🔤 Audio transcript delta:', event.delta);
           console.log('🔍 Current pair ref:', currentPairRef.current);
           console.log('🔍 Assistant transcript so far:', assistantTranscriptRef.current);
+          console.log('🔍 Delta event object:', JSON.stringify(event, null, 2));
           if (event.delta && event.delta.trim()) {
-            console.log('📝 Updating assistant transcript with delta');
+            console.log('📝 Updating assistant transcript with delta:', event.delta);
             updateAssistantTranscript(event.delta);
           } else {
             console.log('⚠️ Empty or invalid delta received');
@@ -643,82 +712,114 @@ export const useVoiceConversation = () => {
 
         case 'response.audio_transcript.done':
           console.log('✅ Audio transcript completed:', event.transcript);
+          console.log('🔍 Event object:', JSON.stringify(event, null, 2));
+          
           if (event.transcript && event.transcript.trim()) {
-            dispatch(setLastTranslation(event.transcript.trim()));
-            console.log('✅ Finalizing assistant transcript');
-            finalizeAssistantTranscript(event.transcript.trim());
-          } else if (currentPairRef.current) {
-            // If no transcript but we have a pair, mark it as failed
-            console.log('⚠️ No transcript received, marking pair as failed');
-            dispatch(updateTranslationPair({
-              id: currentPairRef.current,
-              translatedText: 'Translation failed - please try again',
-              isComplete: true
-            }));
+            const finalTranscript = event.transcript.trim();
+            console.log('📝 Processing final transcript:', finalTranscript);
+            dispatch(setLastTranslation(finalTranscript));
+            finalizeAssistantTranscript(finalTranscript);
+            
+            // Clear emergency timeout and update status
+            clearEmergencyTimeout();
+            
+            // Reset current pair reference
+            currentPairRef.current = null;
+            assistantTranscriptRef.current = '';
+            
+            updateVoiceStatusWithTracking({ 
+              status: '✅ Translation complete! Ready for next speaker...', 
+              isListening: false 
+            });
+          } else {
+            console.log('⚠️ Empty or missing transcript in audio_transcript.done event');
+            console.log('🔍 Trying to use accumulated transcript:', assistantTranscriptRef.current);
+            
+            if (assistantTranscriptRef.current && assistantTranscriptRef.current.trim()) {
+              console.log('✅ Using accumulated transcript from deltas');
+              finalizeAssistantTranscript(assistantTranscriptRef.current.trim());
+              
+              // Clear emergency timeout and update status
+              clearEmergencyTimeout();
+              currentPairRef.current = null;
+              assistantTranscriptRef.current = '';
+              
+              updateVoiceStatusWithTracking({ 
+                status: '✅ Translation complete! Ready for next speaker...', 
+                isListening: false 
+              });
+            } else {
+              console.log('⚠️ No transcript available from any source');
+              // Don't force complete here - let output_audio_buffer.stopped timeout handle it
+            }
           }
-          
-          // Clear emergency timeout and update status
-          clearEmergencyTimeout();
-          
-          // Reset current pair reference
-          currentPairRef.current = null;
-          assistantTranscriptRef.current = '';
-          
-          updateVoiceStatusWithTracking({ 
-            status: '✅ Translation complete! Ready for next speaker...', 
-            isListening: false 
-          });
           break;
 
         case 'response.done':
           console.log('🏁 OpenAI response completed');
           console.log('🔍 Final assistant transcript:', assistantTranscriptRef.current);
           console.log('🔍 Current pair ref:', currentPairRef.current);
+          console.log('🔍 Response event data:', JSON.stringify(event, null, 2));
           
-          // If we still have a pair that hasn't been completed, force completion
-          if (currentPairRef.current) {
-            const finalText = assistantTranscriptRef.current.trim() || 'Translation not received - please try again';
-            console.log('🚨 Force completing remaining pair with:', finalText);
-            dispatch(updateTranslationPair({
-              id: currentPairRef.current,
-              translatedText: finalText,
-              isComplete: true
-            }));
-          }
+          // IMPORTANT: Don't immediately complete here - wait for audio transcript events
+          // This event often comes BEFORE the actual transcript events
+          console.log('⏳ Response done - waiting for transcript completion...');
           
-          // Clear all emergency timeouts and ensure clean state
+          // Only force complete if we wait a bit and still have an incomplete pair
+          setTimeout(() => {
+            if (currentPairRef.current) {
+              console.log('⚠️ Translation pair still incomplete after response.done - force completing');
+              let finalText = assistantTranscriptRef.current.trim();
+              
+              // Try to extract text from the response event itself as a fallback
+              if (!finalText && event.response && (event as any).response.output) {
+                const output = (event as any).response.output;
+                if (output.length > 0 && output[0].content && output[0].content.length > 0) {
+                  const content = output[0].content[0];
+                  finalText = content.transcript || content.text || '';
+                  console.log('🔧 Extracted text from response.done event:', finalText);
+                }
+              }
+              
+              // Final fallback
+              if (!finalText) {
+                finalText = 'Response completed - transcript processing issue';
+              }
+              
+              console.log('🚨 Force completing remaining pair with:', finalText);
+              dispatch(updateTranslationPair({
+                id: currentPairRef.current,
+                translatedText: finalText,
+                isComplete: true
+              }));
+              
+              // Clean up
+              currentPairRef.current = null;
+              assistantTranscriptRef.current = '';
+              
+              // Set ready state
+              dispatch(updateVoiceStatus({ 
+                status: '🎤 Ready for medical interpretation...', 
+                isListening: false 
+              }));
+            }
+          }, 1000); // Wait 1 second for transcript events
+          
+          // Clear emergency timeout and pending message state
           clearEmergencyTimeout();
           dispatch(setPendingUserMessage(false));
-          assistantTranscriptRef.current = '';
-          currentPairRef.current = null;
-          
-          // Set ready state
-          dispatch(updateVoiceStatus({ 
-            status: '🎤 Ready for medical interpretation...', 
-            isListening: false 
-          }));
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
-          console.log('📝 User speech transcription completed:', event.transcript);
+          console.log('📝 User transcript completed:', event.transcript);
           if (event.transcript) {
-            console.log('🗣️ User said:', event.transcript);
-            console.log('🔍 About to call handleUserTranscript...');
-            
-            // Check if this should trigger a function call
-            const text = event.transcript.toLowerCase();
-            if (text.includes('send lab order') || text.includes('order tests') || text.includes('get labs')) {
-              console.log('🚨 FUNCTION TRIGGER DETECTED in transcript:', event.transcript);
-              console.log('🚨 OpenAI should call send_lab_order function now...');
-            }
-            if (text.includes('schedule follow') || text.includes('next appointment') || text.includes('come back')) {
-              console.log('🚨 APPOINTMENT TRIGGER DETECTED in transcript:', event.transcript);
-              console.log('🚨 OpenAI should call schedule_followup_appointment function now...');
-            }
-            
             handleUserTranscript(event.transcript);
-            console.log('✅ handleUserTranscript completed');
           }
+          break;
+
+        case 'conversation.item.input_audio_transcription.delta':
+          console.log('🔤 User transcript delta:', event.delta);
+          // Handle streaming user transcription if needed
           break;
 
         case 'conversation.item.input_audio_transcription.failed':
@@ -738,6 +839,50 @@ export const useVoiceConversation = () => {
           console.log('🎯 Function name:', event.name);
           console.log('🎯 Function arguments:', event.arguments);
           handleFunctionCall(event);
+          break;
+
+        case 'output_audio_buffer.stopped':
+          console.log('🔊 OpenAI audio output stopped:', event);
+          // This event indicates TTS finished, but transcript might come in separate events
+          // Give a short window for transcript events to arrive before falling back
+          
+          if (currentPairRef.current) {
+            console.log('⏳ Audio stopped, waiting 800ms for transcript events...');
+            
+            // Wait a moment for transcript events to arrive
+            setTimeout(() => {
+              // Check if translation pair was already completed by transcript events
+              if (currentPairRef.current) {
+                let finalText = assistantTranscriptRef.current.trim();
+                
+                if (finalText) {
+                  console.log('✅ Completing translation with accumulated transcript:', finalText);
+                  dispatch(setLastTranslation(finalText));
+                  finalizeAssistantTranscript(finalText);
+                } else {
+                  console.log('⚠️ No transcript received after audio stopped, using final fallback');
+                  dispatch(updateTranslationPair({
+                    id: currentPairRef.current,
+                    translatedText: 'Audio played - transcript not captured',
+                    isComplete: true
+                  }));
+                  currentPairRef.current = null;
+                  assistantTranscriptRef.current = '';
+                  
+                  // Update status
+                  dispatch(updateVoiceStatus({ 
+                    status: '⚠️ Audio played but transcript missing. Ready for next speaker...', 
+                    isListening: false 
+                  }));
+                }
+                
+                // Clear emergency timeout
+                clearEmergencyTimeout();
+              } else {
+                console.log('✅ Translation pair already completed by transcript event');
+              }
+            }, 800); // Give 800ms for transcript events to arrive
+          }
           break;
 
         case 'rate_limits.updated':
