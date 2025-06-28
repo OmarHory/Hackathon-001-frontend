@@ -51,6 +51,7 @@ export const useVoiceConversation = () => {
   // Refs for managing current translation pair
   const currentPairRef = useRef<string | null>(null);
   const assistantTranscriptRef = useRef<string>('');
+  const translationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check browser compatibility on hook initialization
   const checkBrowserSupport = useCallback(() => {
@@ -522,6 +523,32 @@ export const useVoiceConversation = () => {
             status: '🗣️ Generating translation...', 
             isListening: false 
           }));
+          
+          // Set failsafe timeout to prevent getting stuck on "Translating..."
+          if (translationTimeoutRef.current) {
+            clearTimeout(translationTimeoutRef.current);
+          }
+          translationTimeoutRef.current = setTimeout(() => {
+            console.log('⏰ Translation timeout - forcing ready state');
+            
+            // Force complete any stuck translation pair
+            if (currentPairRef.current && assistantTranscriptRef.current) {
+              console.log('🔧 Force completing stuck translation pair');
+              dispatch(updateTranslationPair({
+                id: currentPairRef.current,
+                translatedText: assistantTranscriptRef.current || 'Translation completed'
+              }));
+            }
+            
+            // Reset state
+            currentPairRef.current = null;
+            assistantTranscriptRef.current = '';
+            
+            dispatch(updateVoiceStatus({ 
+              status: '🎤 Ready for medical interpretation...', 
+              isListening: false 
+            }));
+          }, 10000); // 10 second timeout
           break;
 
         case 'response.output_item.added':
@@ -558,18 +585,46 @@ export const useVoiceConversation = () => {
               finalizeAssistantTranscript(event.transcript);
             }
           }
-          break;
-
-        case 'response.done':
-          console.log('🏁 OpenAI response completed');
+          
+          // FORCE status update to prevent getting stuck
           dispatch(updateVoiceStatus({ 
             status: '✅ Translation complete! Ready for next speaker...', 
             isListening: false 
           }));
+          
+          // Clear the failsafe timeout since we completed successfully
+          if (translationTimeoutRef.current) {
+            clearTimeout(translationTimeoutRef.current);
+            translationTimeoutRef.current = null;
+          }
+          break;
+
+        case 'response.done':
+          console.log('🏁 OpenAI response completed');
+          
+          // ENSURE we clear any stuck states
+          dispatch(updateVoiceStatus({ 
+            status: '✅ Ready for next speaker! 🎤', 
+            isListening: false 
+          }));
           dispatch(setPendingUserMessage(false));
           assistantTranscriptRef.current = '';
-          // Process any queued messages
-          setTimeout(() => processMessageQueue(), 100);
+          
+          // Process any queued messages with a slight delay
+          setTimeout(() => {
+            processMessageQueue();
+            // Double-check we're in ready state
+            dispatch(updateVoiceStatus({ 
+              status: '🎤 Ready for medical interpretation...', 
+              isListening: false 
+            }));
+          }, 200);
+          
+          // Clear the failsafe timeout since response is done
+          if (translationTimeoutRef.current) {
+            clearTimeout(translationTimeoutRef.current);
+            translationTimeoutRef.current = null;
+          }
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
@@ -680,9 +735,13 @@ export const useVoiceConversation = () => {
       dispatch(clearCurrentSession());
       dispatch(hideIntent());
       
-      // Reset refs
+      // Reset refs and clear timeouts
       currentPairRef.current = null;
       assistantTranscriptRef.current = '';
+      if (translationTimeoutRef.current) {
+        clearTimeout(translationTimeoutRef.current);
+        translationTimeoutRef.current = null;
+      }
       
       dispatch(updateVoiceStatus({ status: 'Session ended! Summary saved to history. 📋' }));
       
