@@ -134,7 +134,12 @@ export class WebRTCService {
     const sessionConfig = {
       type: "session.update",
       session: {
-        instructions: `PRIORITY 1 - MEDICAL ACTIONS (CHECK FIRST):
+        instructions: `STARTUP BEHAVIOR:
+- DO NOT provide any initial greeting or introduction
+- START SILENT and wait for someone to speak first
+- Only respond when someone actually says something
+
+PRIORITY 1 - MEDICAL ACTIONS (CHECK FIRST):
 If you hear ANY of these phrases, STOP and call the function immediately:
 - "send lab order", "order tests", "get labs", "blood work", "run tests" → call send_lab_order with tests_ordered: ["general lab work"]
 - "schedule follow-up", "next appointment", "come back in", "see you again" → call schedule_followup_appointment
@@ -148,7 +153,7 @@ PRIORITY 3 - TRANSLATION (only if no medical action detected):
 - If someone speaks in Spanish → translate to English
 - Use accurate medical terminology
 
-You are a medical assistant that executes actions first, then translates.`,
+You are a medical assistant that executes actions first, then translates. NEVER speak first - always wait for input.`,
         voice: "alloy",
         input_audio_transcription: {
           model: "whisper-1"
