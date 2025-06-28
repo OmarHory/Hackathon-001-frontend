@@ -1,9 +1,16 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { VoiceState, WebRTCConnection, RealtimeEvent } from '../../types';
+import { VoiceState, RealtimeEvent } from '../../types';
+
+// Serializable connection info for Redux (no RTCPeerConnection objects)
+interface SerializableConnection {
+  sessionId: string | null;
+  isConnected: boolean;
+  connectionState: string;
+}
 
 interface VoiceSliceState {
   voiceState: VoiceState;
-  connection: WebRTCConnection;
+  connection: SerializableConnection;
   lastTranslation: string;
   conversationEnded: boolean;
   pendingUserMessage: boolean;
@@ -19,10 +26,9 @@ const initialState: VoiceSliceState = {
     errorMessage: undefined,
   },
   connection: {
-    peerConnection: null,
-    dataChannel: null,
-    localStream: null,
     sessionId: null,
+    isConnected: false,
+    connectionState: 'new',
   },
   lastTranslation: '',
   conversationEnded: false,
@@ -99,10 +105,9 @@ export const startVoiceSession = createAsyncThunk(
       });
 
       return {
-        peerConnection,
-        dataChannel,
-        localStream,
         sessionId: sessionId || null,
+        isConnected: true,
+        connectionState: 'connected',
       };
     } catch (error) {
       return rejectWithValue((error as Error).message);
@@ -156,7 +161,7 @@ const voiceSlice = createSlice({
         state.voiceState.errorMessage = undefined;
       }
     },
-    setConnection: (state, action: PayloadAction<Partial<WebRTCConnection>>) => {
+    setConnection: (state, action: PayloadAction<Partial<SerializableConnection>>) => {
       state.connection = { ...state.connection, ...action.payload };
     },
     setConnected: (state, action: PayloadAction<boolean>) => {
@@ -192,13 +197,11 @@ const voiceSlice = createSlice({
       state.messageQueue = [];
     },
     cleanupConnection: (state) => {
-      // This reducer doesn't modify the connection objects directly
-      // The actual cleanup is handled in the component
+      // Reset connection info (actual WebRTC cleanup handled in service)
       state.connection = {
-        peerConnection: null,
-        dataChannel: null,
-        localStream: null,
         sessionId: null,
+        isConnected: false,
+        connectionState: 'new',
       };
     },
   },

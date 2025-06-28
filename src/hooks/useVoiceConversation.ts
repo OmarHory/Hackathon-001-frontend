@@ -161,8 +161,8 @@ export const useVoiceConversation = () => {
     return spanishIndicators.test(text);
   }, []);
 
-  // Auto-summarize and end conversation with error handling
-  const summarizeAndEndConversation = useCallback(async () => {
+  // Generate summary without ending conversation
+  const generateSummaryOnly = useCallback(async () => {
     if (!connection?.sessionId) return;
     
     try {
@@ -171,7 +171,7 @@ export const useVoiceConversation = () => {
       
       const summaryResult = await dispatch(generateSummary(connection.sessionId)).unwrap();
       
-      // Also set the current session as selectedConversation so the summary shows in UI
+      // Set the current session as selectedConversation so the summary shows in UI
       dispatch({
         type: 'conversation/fetchConversationDetails/fulfilled',
         payload: {
@@ -181,9 +181,11 @@ export const useVoiceConversation = () => {
       });
       
       dispatch(updateVoiceStatus({ 
-        status: '📋 Medical summary generated successfully!', 
+        status: '✅ Medical summary saved! You can continue the conversation.', 
         isError: false 
       }));
+      
+      return summaryResult.summary;
       
     } catch (error) {
       const errorDetails = errorHandler.handleError(error, 'summary');
@@ -194,11 +196,25 @@ export const useVoiceConversation = () => {
     }
   }, [connection, dispatch]);
 
+  // Auto-summarize and end conversation with error handling
+  const summarizeAndEndConversation = useCallback(async () => {
+    await generateSummaryOnly();
+    // Add delay before stopping if needed
+    setTimeout(() => {
+      stopVoiceChat();
+    }, 1000);
+  }, [generateSummaryOnly]);
+
   // Handle function calls (medical actions) with comprehensive error handling
   const handleFunctionCall = useCallback(async (event: any) => {
     const functionName = event.name;
     const argumentsStr = event.arguments || '{}';
     const callId = event.call_id;
+    
+    console.log('🎯 Function call received:', { functionName, callId });
+    console.log('🔍 Available session IDs:');
+    console.log('   - connection.sessionId:', connection?.sessionId);
+    console.log('   - currentSession.session_id:', currentSession?.session_id);
     
     try {
       let argumentsObj = {};
@@ -216,12 +232,40 @@ export const useVoiceConversation = () => {
         dispatch(updateVoiceStatus({ status: '📅 Scheduling follow-up appointment...' }));
       }
       
-      // Send function call to backend
+      // Send function call to backend - use current session ID from state
+      console.log('🔍 DEBUG: Checking available session IDs...');
+      console.log('   - connection object:', connection);
+      console.log('   - connection?.sessionId:', connection?.sessionId);
+      console.log('   - currentSession object:', currentSession);
+      console.log('   - currentSession?.session_id:', currentSession?.session_id);
+      
+      // Try multiple sources for session ID
+      let sessionId = connection?.sessionId || currentSession?.session_id;
+      
+      // Fallback: get session ID directly from WebRTC service
+      if (!sessionId) {
+        const webrtcConnection = webrtcService.getConnection();
+        sessionId = webrtcConnection.sessionId;
+        console.log('🔄 Fallback: Got session ID from WebRTC service:', sessionId);
+      }
+      
+      console.log('   - Final sessionId:', sessionId);
+      
+      if (!sessionId) {
+        console.error('❌ No session ID available from any source!');
+        console.error('   Redux connection state:', connection);
+        console.error('   Redux session state:', currentSession);
+        console.error('   WebRTC service connection:', webrtcService.getConnection());
+        throw new Error('No active session found. Please start a new medical interpretation session.');
+      }
+      
+      console.log('📤 Sending function call with session ID:', sessionId);
+      
       const result = await dispatch(sendFunctionCall({
         functionName,
         args: argumentsObj,
         callId,
-        sessionId: connection?.sessionId || 'frontend_session'
+        sessionId
       })).unwrap();
       
       // Send function result back to OpenAI
@@ -247,11 +291,11 @@ export const useVoiceConversation = () => {
       
       webrtcService.sendMessage(responseRequest);
       
-      // Auto-summarize and end conversation after tool use
+      // Auto-generate summary after medical action (without ending conversation)
       setTimeout(() => {
-        console.log('📋 Auto-summarizing conversation after tool use...');
-        summarizeAndEndConversation();
-      }, 3000);
+        console.log('📋 Auto-generating summary after medical action...');
+        generateSummaryOnly();
+      }, 2000);
       
     } catch (error) {
       const errorDetails = handleMedicalActionError(
@@ -268,7 +312,7 @@ export const useVoiceConversation = () => {
       const recoveryActions = errorHandler.getRecoveryActions(errorDetails.code);
       console.log('🔧 Recovery suggestions:', recoveryActions);
     }
-  }, [dispatch, connection, summarizeAndEndConversation]);
+  }, [dispatch, connection, currentSession, generateSummaryOnly]);
 
   // Handle user transcript (speech recognition result) with error handling
   const handleUserTranscript = useCallback((transcript: string) => {
@@ -450,6 +494,18 @@ export const useVoiceConversation = () => {
           console.log('📝 User speech transcription completed:', event.transcript);
           if (event.transcript) {
             console.log('🗣️ User said:', event.transcript);
+            
+            // Check if this should trigger a function call
+            const text = event.transcript.toLowerCase();
+            if (text.includes('send lab order') || text.includes('order tests') || text.includes('get labs')) {
+              console.log('🚨 FUNCTION TRIGGER DETECTED in transcript:', event.transcript);
+              console.log('🚨 OpenAI should call send_lab_order function now...');
+            }
+            if (text.includes('schedule follow') || text.includes('next appointment') || text.includes('come back')) {
+              console.log('🚨 APPOINTMENT TRIGGER DETECTED in transcript:', event.transcript);
+              console.log('🚨 OpenAI should call schedule_followup_appointment function now...');
+            }
+            
             handleUserTranscript(event.transcript);
           }
           break;
@@ -468,6 +524,8 @@ export const useVoiceConversation = () => {
 
         case 'response.function_call_arguments.done':
           console.log('🎯 FUNCTION CALL DETECTED!', event);
+          console.log('🎯 Function name:', event.name);
+          console.log('🎯 Function arguments:', event.arguments);
           handleFunctionCall(event);
           break;
 
@@ -512,7 +570,7 @@ export const useVoiceConversation = () => {
       // Cleanup WebRTC
       webrtcService.cleanup();
       
-      // Reset Redux state
+      // Reset Redux state  
       dispatch(cleanupConnection());
       dispatch(resetVoiceState());
       dispatch(clearCurrentSession());
@@ -570,16 +628,43 @@ export const useVoiceConversation = () => {
       // Start WebRTC connection
       const connectionResult = await webrtcService.startConnection();
       
-      dispatch(setConnection(connectionResult));
+      console.log('🔗 WebRTC connection result:', connectionResult);
+      console.log('📋 Session ID from connection:', connectionResult.sessionId);
+      console.log('🔍 Connection result type:', typeof connectionResult);
+      console.log('🔍 Connection result keys:', Object.keys(connectionResult));
+      
+      // Store only serializable connection data in Redux
+      const serializableConnection = {
+        sessionId: connectionResult.sessionId,
+        isConnected: true,
+        connectionState: 'connected'
+      };
+      
+      console.log('💾 Storing connection in Redux:', serializableConnection);
+      dispatch(setConnection(serializableConnection));
       
       // Create session if we have a session ID
       if (connectionResult.sessionId) {
-        dispatch(setCurrentSession({
+        const sessionData = {
           session_id: connectionResult.sessionId,
           started_at: new Date().toISOString(),
           total_messages: 0,
           is_active: true,
-        }));
+        };
+        
+        console.log('✅ Setting current session with data:', sessionData);
+        dispatch(setCurrentSession(sessionData));
+        
+        // Verify session was set
+        setTimeout(() => {
+          console.log('🔍 Verifying session was set in Redux...');
+          console.log('   Current connection from Redux:', connection);
+          console.log('   Current session from Redux:', currentSession);
+        }, 100);
+        
+      } else {
+        console.warn('⚠️ No session ID received from WebRTC service!');
+        console.warn('   WebRTC result was:', connectionResult);
       }
       
     } catch (error) {

@@ -66,25 +66,7 @@ export class WebRTCService {
       console.log('✅ ICE gathering complete');
 
       // Step 9: Send offer to backend using API service
-      const sdpOffer = this.connection.peerConnection.localDescription!.sdp;
-      
-      // Debug logging for SDP
-      console.log('📋 SDP Offer Details:');
-      console.log('   Length:', sdpOffer.length, 'characters');
-      console.log('   ICE gathering state:', this.connection.peerConnection.iceGatheringState);
-      console.log('   First 200 chars:', sdpOffer.substring(0, 200));
-      console.log('   Last 200 chars:', sdpOffer.substring(sdpOffer.length - 200));
-      
-      if (sdpOffer.length < 100) {
-        throw new Error(`SDP offer too short (${sdpOffer.length} chars) - likely incomplete`);
-      }
-      
-      console.log('🌐 Sending SDP offer to backend...');
-      const rtcResult = await webrtcAPI.connect(sdpOffer);
-      console.log('✅ Backend responded successfully:');
-      console.log('   Session ID:', rtcResult.sessionId);
-      console.log('   SDP Answer length:', rtcResult.sdpAnswer?.length || 0);
-      console.log('   SDP Answer preview:', rtcResult.sdpAnswer?.substring(0, 100) || 'No SDP answer');
+      const rtcResult = await webrtcAPI.connect(this.connection.peerConnection.localDescription!.sdp);
       
       this.connection.sessionId = rtcResult.sessionId;
       const answerSdp = rtcResult.sdpAnswer;
@@ -152,24 +134,21 @@ export class WebRTCService {
     const sessionConfig = {
       type: "session.update",
       session: {
-        instructions: `You are a medical interpreter helping communication between English-speaking clinicians and Spanish-speaking patients.
+        instructions: `PRIORITY 1 - MEDICAL ACTIONS (CHECK FIRST):
+If you hear ANY of these phrases, STOP and call the function immediately:
+- "send lab order", "order tests", "get labs", "blood work", "run tests" → call send_lab_order with tests_ordered: ["general lab work"]
+- "schedule follow-up", "next appointment", "come back in", "see you again" → call schedule_followup_appointment
+DO NOT TRANSLATE THESE - EXECUTE THE FUNCTION IMMEDIATELY!
 
-PRIMARY JOB:
-- If someone speaks in English → translate to Spanish
-- If someone speaks in Spanish → translate to English
-- Detect language automatically
-- Use accurate medical terminology
-- Keep translations natural and clear
-
-SPECIAL COMMANDS:
+PRIORITY 2 - SPECIAL COMMANDS:
 - "repeat that", "repeat", "say again" or "repite eso", "repite", "otra vez" → repeat the last translation exactly
 
-CRITICAL TOOL USAGE:
-- When you hear "send lab order", "order blood tests", "get labs", "run tests" → IMMEDIATELY call send_lab_order function
-- When you hear "schedule follow-up", "next appointment", "come back in", "see you again" → IMMEDIATELY call schedule_followup_appointment function
-- Do NOT ask for confirmation - execute the function immediately when these phrases are detected
+PRIORITY 3 - TRANSLATION (only if no medical action detected):
+- If someone speaks in English → translate to Spanish
+- If someone speaks in Spanish → translate to English
+- Use accurate medical terminology
 
-You are professional, accurate, and help ensure clear medical communication between clinician and patient.`,
+You are a medical assistant that executes actions first, then translates.`,
         voice: "alloy",
         input_audio_transcription: {
           model: "whisper-1"
@@ -223,7 +202,11 @@ You are professional, accurate, and help ensure clear medical communication betw
       }
     };
 
-    console.log('📤 Sending session configuration:', sessionConfig);
+    console.log('📤 Sending session configuration with function priority:');
+    console.log('   Tools configured:', sessionConfig.session.tools.map(t => t.name));
+    console.log('   Tool choice:', sessionConfig.session.tool_choice);
+    console.log('   Functions:', sessionConfig.session.tools.map(t => `${t.name}: ${t.description}`));
+    
     this.connection.dataChannel.send(JSON.stringify(sessionConfig));
     console.log('✅ Session configuration sent to OpenAI');
     
