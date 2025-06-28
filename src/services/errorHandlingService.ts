@@ -58,6 +58,24 @@ export class ErrorHandlingService {
       severity: 'high',
       retryable: true
     },
+    HTTPS_REQUIRED: {
+      code: 'HTTPS_REQUIRED',
+      userMessage: '🔒 HTTPS is required for microphone access. Please use https:// instead of http://',
+      severity: 'critical',
+      retryable: false
+    },
+    MOBILE_AUTOPLAY_BLOCKED: {
+      code: 'MOBILE_AUTOPLAY_BLOCKED',
+      userMessage: '📱 Audio autoplay is blocked on mobile. Please tap the screen to enable audio.',
+      severity: 'medium',
+      retryable: true
+    },
+    MOBILE_MICROPHONE_BUSY: {
+      code: 'MOBILE_MICROPHONE_BUSY',
+      userMessage: '📱 Microphone is being used by another app. Please close other apps and try again.',
+      severity: 'medium',
+      retryable: true
+    },
 
     // OpenAI/Session Errors
     OPENAI_API_ERROR: {
@@ -160,7 +178,26 @@ export class ErrorHandlingService {
 
     // WebRTC errors
     if (context === 'webrtc') {
+      // Check for HTTPS requirement
+      if (error.message.includes('HTTPS') || error.message.includes('https://')) {
+        return {
+          ...this.errorMessages.HTTPS_REQUIRED,
+          message: error.message,
+          timestamp
+        } as ErrorDetails;
+      }
+
       if (error.name === 'NotAllowedError' || error.message.includes('microphone')) {
+        // Check if mobile and provide mobile-specific guidance
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile && error.message.includes('used by another')) {
+          return {
+            ...this.errorMessages.MOBILE_MICROPHONE_BUSY,
+            message: error.message,
+            timestamp
+          } as ErrorDetails;
+        }
+        
         return {
           ...this.errorMessages.MICROPHONE_ACCESS_DENIED,
           message: error.message,
@@ -171,6 +208,14 @@ export class ErrorHandlingService {
       if (error.message.includes('ICE') || error.message.includes('ice')) {
         return {
           ...this.errorMessages.WEBRTC_ICE_FAILED,
+          message: error.message,
+          timestamp
+        } as ErrorDetails;
+      }
+
+      if (error.message.includes('autoplay')) {
+        return {
+          ...this.errorMessages.MOBILE_AUTOPLAY_BLOCKED,
           message: error.message,
           timestamp
         } as ErrorDetails;
@@ -300,12 +345,36 @@ export class ErrorHandlingService {
       MICROPHONE_ACCESS_DENIED: [
         'Click the microphone icon in your browser address bar',
         'Select "Allow" for microphone access',
-        'Refresh the page and try again'
+        'Refresh the page and try again',
+        'On mobile: Check Settings > Privacy > Microphone'
+      ],
+      HTTPS_REQUIRED: [
+        'Use https:// instead of http:// in the URL',
+        'Contact your administrator to enable HTTPS',
+        'Try accessing from a secure connection'
+      ],
+      MOBILE_AUTOPLAY_BLOCKED: [
+        'Tap anywhere on the screen to enable audio',
+        'Check your browser autoplay settings',
+        'Enable "Allow audio and video" in browser settings'
+      ],
+      MOBILE_MICROPHONE_BUSY: [
+        'Close other apps that might be using the microphone',
+        'End any active phone calls',
+        'Check for voice recorder or camera apps running in background',
+        'Restart your browser and try again'
       ],
       WEBRTC_CONNECTION_FAILED: [
         'Check your internet connection',
         'Try refreshing the page',
-        'Contact IT support if problem persists'
+        'If on corporate network, contact IT about WebRTC/firewall settings',
+        'Try switching to a different network (mobile hotspot)'
+      ],
+      WEBRTC_ICE_FAILED: [
+        'Check your firewall settings',
+        'Try connecting from a different network',
+        'Contact IT support about opening ports 3478-3479',
+        'If on VPN, try disconnecting temporarily'
       ],
       NETWORK_ERROR: [
         'Check your internet connection',
@@ -327,6 +396,7 @@ export class ErrorHandlingService {
     return actions[errorCode] || [
       'Try refreshing the page',
       'Clear your browser cache',
+      'Try using a different browser (Chrome, Firefox, Safari, or Edge)',
       'Contact technical support if the problem continues'
     ];
   }

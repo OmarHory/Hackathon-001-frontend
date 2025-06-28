@@ -11,6 +11,7 @@ import Button from '../components/ui/Button';
 import TranslationPair from '../components/conversation/TranslationPair';
 import Navigation from '../components/layout/Navigation';
 import IntentIndicator from '../components/ui/IntentIndicator';
+import MobileAudioHandler from '../components/ui/MobileAudioHandler';
 
 const InterpreterPageContainer = styled.div`
   padding: 20px;
@@ -194,6 +195,11 @@ const InterpreterPage: React.FC = () => {
 
   return (
     <InterpreterPageContainer>
+      {/* Mobile Audio Handler - Handles mobile-specific audio initialization */}
+      <MobileAudioHandler onUserInteraction={() => {
+        console.log('Mobile audio interaction completed');
+      }} />
+      
       {/* Intent Indicator - Fixed position */}
       <IntentIndicator />
       

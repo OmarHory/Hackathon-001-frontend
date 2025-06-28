@@ -1,6 +1,26 @@
 import { WebRTCConnection, RealtimeEvent } from '../types';
 import { webrtcAPI } from './apiService';
 
+// Mobile and browser detection utilities
+const isMobile = (): boolean => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
+const isIOS = (): boolean => {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+};
+
+const isSafari = (): boolean => {
+  return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+};
+
+// Check if HTTPS is required and available
+const checkHTTPS = (): { isSecure: boolean; requiresHTTPS: boolean } => {
+  const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  const requiresHTTPS = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+  return { isSecure, requiresHTTPS };
+};
+
 export class WebRTCService {
   private connection: WebRTCConnection = {
     peerConnection: null,
@@ -11,38 +31,62 @@ export class WebRTCService {
 
   private onEventCallback?: (event: RealtimeEvent) => void;
   private onConnectionStateChangeCallback?: (state: RTCPeerConnectionState) => void;
+  private audioContext?: AudioContext;
+  private permissionState: 'prompt' | 'granted' | 'denied' = 'prompt';
 
   async startConnection(): Promise<WebRTCConnection> {
     try {
       console.log('🚀 Starting WebRTC connection...');
+      console.log('📱 Mobile device:', isMobile());
+      console.log('🍎 iOS device:', isIOS());
+      console.log('🌐 Safari browser:', isSafari());
 
-      // Step 1: Get microphone access
+      // Step 0: Check HTTPS requirements
+      const httpsCheck = checkHTTPS();
+      if (httpsCheck.requiresHTTPS && !httpsCheck.isSecure) {
+        throw new Error('HTTPS is required for microphone access. Please use https:// instead of http://');
+      }
+      console.log('🔒 HTTPS check passed');
+
+      // Step 1: Check browser compatibility
+      await this.checkBrowserCompatibility();
+      console.log('✅ Browser compatibility check passed');
+
+      // Step 2: Check/request permissions proactively
+      await this.checkMicrophonePermissions();
+      console.log('✅ Microphone permissions check passed');
+
+      // Step 3: Get microphone access with mobile-specific handling
       console.log('🎤 Requesting microphone access...');
-      this.connection.localStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
-        video: false 
-      });
+      this.connection.localStream = await this.getMicrophoneStream();
       console.log('✅ Got microphone access');
 
-      // Step 2: Create WebRTC peer connection
+      // Step 4: Create WebRTC peer connection with multiple ICE servers
       this.connection.peerConnection = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          // Add TURN servers for corporate networks (you'll need to configure these)
+          // { urls: 'turn:your-turn-server.com:3478', username: 'user', credential: 'pass' },
+        ]
       });
-      console.log('✅ Created peer connection');
+      console.log('✅ Created peer connection with multiple ICE servers');
 
-      // Step 3: Add microphone track
+      // Step 5: Add microphone track
       const audioTracks = this.connection.localStream.getAudioTracks();
       if (audioTracks.length > 0) {
         this.connection.peerConnection.addTrack(audioTracks[0], this.connection.localStream);
         console.log('✅ Added audio track');
       }
 
-      // Step 4: Create data channel for events
+      // Step 6: Create data channel for events
       this.connection.dataChannel = this.connection.peerConnection.createDataChannel('oai-events');
       this.setupDataChannel();
       console.log('✅ Created data channel');
 
-      // Step 5: Handle connection state changes
+      // Step 7: Handle connection state changes
       this.connection.peerConnection.onconnectionstatechange = () => {
         const state = this.connection.peerConnection!.connectionState;
         console.log('🔗 Connection state:', state);
@@ -51,21 +95,21 @@ export class WebRTCService {
         }
       };
 
-      // Step 6: Handle incoming audio tracks (for OpenAI voice response)
+      // Step 8: Handle incoming audio tracks (for OpenAI voice response)
       this.connection.peerConnection.ontrack = (event) => {
         console.log('🔊 Received audio track from OpenAI');
         this.createAudioElement(event.streams[0]);
       };
 
-      // Step 7: Set local description (create offer)
+      // Step 9: Set local description (create offer)
       await this.connection.peerConnection.setLocalDescription();
       console.log('✅ Set local description');
 
-      // Step 8: Wait for ICE gathering to complete
+      // Step 10: Wait for ICE gathering to complete
       await this.waitForICEGathering();
       console.log('✅ ICE gathering complete');
 
-      // Step 9: Send offer to backend using API service
+      // Step 11: Send offer to backend using API service
       const rtcResult = await webrtcAPI.connect(this.connection.peerConnection.localDescription!.sdp);
       
       this.connection.sessionId = rtcResult.sessionId;
@@ -75,14 +119,14 @@ export class WebRTCService {
         throw new Error('Invalid SDP answer received from server');
       }
 
-      // Step 10: Set remote description
+      // Step 12: Set remote description
       await this.connection.peerConnection.setRemoteDescription({
         type: 'answer',
         sdp: answerSdp
       });
       console.log('✅ Set remote description');
 
-      // Step 11: Wait for connection to be established
+      // Step 13: Wait for connection to be established
       await this.waitForConnectionState('connected');
       console.log('✅ WebRTC connection established!');
 
@@ -245,9 +289,32 @@ You are a medical assistant that executes actions first, then translates. NEVER 
     if (!this.connection.localStream) return;
     
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      const microphone = audioContext.createMediaStreamSource(this.connection.localStream);
+      // Handle AudioContext creation with mobile considerations
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioContextClass();
+      
+      // iOS/Mobile AudioContext requires user interaction before starting
+      if (this.audioContext.state === 'suspended') {
+        console.log('🎵 AudioContext suspended - will resume on user interaction');
+        
+        // Resume AudioContext on user interaction
+        const resumeAudio = () => {
+          if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume().then(() => {
+              console.log('🎵 AudioContext resumed after user interaction');
+            });
+          }
+          // Remove listeners after first use
+          document.removeEventListener('touchstart', resumeAudio);
+          document.removeEventListener('click', resumeAudio);
+        };
+        
+        document.addEventListener('touchstart', resumeAudio, { once: true });
+        document.addEventListener('click', resumeAudio, { once: true });
+      }
+      
+      const analyser = this.audioContext.createAnalyser();
+      const microphone = this.audioContext.createMediaStreamSource(this.connection.localStream);
       
       analyser.fftSize = 256;
       const bufferLength = analyser.frequencyBinCount;
@@ -256,11 +323,13 @@ You are a medical assistant that executes actions first, then translates. NEVER 
       microphone.connect(analyser);
       
       const checkAudioLevel = () => {
-        analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-        
-        if (average > 10) { // Threshold for audio detection
-          console.log('🎤 Audio input detected, level:', Math.round(average));
+        if (this.audioContext?.state === 'running') {
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+          
+          if (average > 10) { // Threshold for audio detection
+            console.log('🎤 Audio input detected, level:', Math.round(average));
+          }
         }
         
         setTimeout(checkAudioLevel, 1000); // Check every second
@@ -286,8 +355,41 @@ You are a medical assistant that executes actions first, then translates. NEVER 
     audio.controls = false;
     audio.style.display = 'none';
     audio.srcObject = stream;
+    
+    // Mobile-specific audio handling
+    if (isMobile()) {
+      // Set additional properties for mobile
+      audio.muted = false;
+      audio.volume = 1.0;
+      
+      // Handle autoplay policy on mobile
+      audio.oncanplay = () => {
+        if (audio.paused) {
+          const playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((error) => {
+              console.warn('⚠️ Audio autoplay failed (mobile policy):', error);
+              // Audio will play when user interacts with page
+            });
+          }
+        }
+      };
+      
+      // iOS Safari specific handling
+      if (isIOS()) {
+        (audio as any).playsInline = true;
+        audio.setAttribute('webkit-playsinline', 'true');
+        audio.setAttribute('playsinline', 'true');
+      }
+    }
+    
     document.body.appendChild(audio);
-    console.log('🔊 Audio element created for OpenAI responses');
+    console.log('🔊 Audio element created for OpenAI responses (mobile-optimized)');
+    
+    // Attempt to play immediately (will be blocked by autoplay policy until user interaction)
+    audio.play().catch((error) => {
+      console.log('🔇 Audio autoplay blocked - will play after user interaction');
+    });
   }
 
   private async waitForICEGathering(): Promise<void> {
@@ -378,6 +480,14 @@ You are a medical assistant that executes actions first, then translates. NEVER 
   cleanup(): void {
     console.log('🧹 Cleaning up WebRTC connection...');
 
+    // Close AudioContext
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {
+        // Ignore close errors
+      });
+      this.audioContext = undefined;
+    }
+
     // Close data channel
     if (this.connection.dataChannel) {
       this.connection.dataChannel.close();
@@ -404,8 +514,99 @@ You are a medical assistant that executes actions first, then translates. NEVER 
       audioElement.remove();
     }
 
+    // Reset permission state
+    this.permissionState = 'prompt';
+
     this.connection.sessionId = null;
     console.log('✅ WebRTC cleanup complete');
+  }
+
+  private async checkBrowserCompatibility(): Promise<void> {
+    const issues: string[] = [];
+
+    // Check WebRTC support
+    if (!window.RTCPeerConnection) {
+      issues.push('WebRTC not supported');
+    }
+
+    // Check getUserMedia support
+    if (!navigator.mediaDevices?.getUserMedia) {
+      issues.push('Microphone access not supported');
+    }
+
+    // Check AudioContext support (with vendor prefixes)
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) {
+      issues.push('Audio processing not supported');
+    }
+
+    if (issues.length > 0) {
+      throw new Error(`Browser compatibility issues: ${issues.join(', ')}. Please use Chrome, Firefox, Safari, or Edge.`);
+    }
+  }
+
+  private async checkMicrophonePermissions(): Promise<void> {
+    if ('permissions' in navigator) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        this.permissionState = permission.state;
+        
+        console.log('🎤 Microphone permission state:', permission.state);
+        
+        if (permission.state === 'denied') {
+          throw new Error('Microphone access is denied. Please enable microphone permissions in your browser settings and refresh the page.');
+        }
+        
+        // Listen for permission changes
+        permission.onchange = () => {
+          this.permissionState = permission.state;
+          console.log('🎤 Microphone permission changed to:', permission.state);
+        };
+      } catch (error) {
+        console.warn('⚠️ Could not check microphone permissions:', error);
+        // Continue anyway - some browsers don't support permission API
+      }
+    }
+  }
+
+  private async getMicrophoneStream(): Promise<MediaStream> {
+    const constraints: MediaStreamConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        // Enhanced settings for mobile
+        ...(isMobile() && {
+          sampleRate: 16000, // Lower sample rate for mobile
+          channelCount: 1,   // Mono for mobile
+        })
+      },
+      video: false
+    };
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // Verify we got audio tracks
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        throw new Error('No audio tracks received from microphone');
+      }
+      
+      console.log('🎤 Audio track settings:', audioTracks[0].getSettings());
+      return stream;
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          throw new Error('Microphone access denied. Please click the microphone icon in your browser and select "Allow", then refresh the page.');
+        } else if (error.name === 'NotFoundError') {
+          throw new Error('No microphone found. Please connect a microphone and try again.');
+        } else if (error.name === 'NotReadableError') {
+          throw new Error('Microphone is being used by another application. Please close other apps using the microphone and try again.');
+        }
+      }
+      throw error;
+    }
   }
 }
 
