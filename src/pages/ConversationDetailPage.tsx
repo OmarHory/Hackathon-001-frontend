@@ -38,7 +38,7 @@ const SessionMeta = styled.div`
   border-radius: 15px;
   margin-bottom: 30px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 20px;
   border-left: 4px solid ${theme.colors.secondary};
 `;
@@ -151,9 +151,19 @@ const ConversationDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (sessionId) {
+      console.log('🔍 Fetching conversation details for session:', sessionId);
       dispatch(fetchConversationDetails(sessionId));
     }
   }, [sessionId, dispatch]);
+
+  // Debug logging
+  useEffect(() => {
+    if (conversationDetails) {
+      console.log('📋 Conversation details received:', conversationDetails);
+      console.log('📋 Summary data:', conversationDetails.summary);
+      console.log('📋 Session data:', conversationDetails.session);
+    }
+  }, [conversationDetails]);
 
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString('en-US', {
@@ -164,23 +174,6 @@ const ConversationDetailPage: React.FC = () => {
       minute: '2-digit',
       second: '2-digit'
     });
-  };
-
-  const formatDuration = (startTime: string, endTime?: string) => {
-    if (!endTime) return 'Session in progress';
-    
-    const start = new Date(startTime).getTime();
-    const end = new Date(endTime).getTime();
-    const durationMs = end - start;
-    const durationMin = Math.round(durationMs / 60000);
-    
-    if (durationMin < 60) {
-      return `${durationMin} minute${durationMin !== 1 ? 's' : ''}`;
-    } else {
-      const hours = Math.floor(durationMin / 60);
-      const minutes = durationMin % 60;
-      return `${hours}h ${minutes}m`;
-    }
   };
 
   if (loading) {
@@ -233,56 +226,102 @@ const ConversationDetailPage: React.FC = () => {
       <SessionMeta>
         <MetaItem>
           <h4>📅 Session Date</h4>
-          <p>{formatDateTime(conversationDetails.started_at)}</p>
-        </MetaItem>
-        
-        <MetaItem>
-          <h4>⏱️ Duration</h4>
-          <p>{formatDuration(conversationDetails.started_at, conversationDetails.ended_at)}</p>
+          <p>{conversationDetails.session ? formatDateTime(conversationDetails.session.started_at) : 'Invalid Date'}</p>
         </MetaItem>
         
         <MetaItem>
           <h4>💬 Total Messages</h4>
-          <p>{conversationDetails.total_messages} exchanges</p>
+          <p>{conversationDetails.session ? conversationDetails.session.total_messages : 0} exchanges</p>
         </MetaItem>
         
         <MetaItem>
           <h4>🔑 Session ID</h4>
           <p style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-            {conversationDetails.session_id}
+            {conversationDetails.session ? conversationDetails.session.session_id : 'N/A'}
           </p>
         </MetaItem>
       </SessionMeta>
 
-      {conversationDetails.summary && (
+      {conversationDetails.summary ? (
         <SummarySection>
           <SummaryTitle>
             📋 Medical Summary
           </SummaryTitle>
+          
+          {/* Main Summary Text */}
+          <div style={{ 
+            background: 'rgba(255, 255, 255, 0.1)',
+            padding: '20px',
+            borderRadius: '10px',
+            marginBottom: '20px'
+          }}>
+            <h4 style={{ color: '#FFD700', margin: '0 0 10px 0' }}>📋 Summary</h4>
+            <p style={{ color: theme.colors.text, margin: 0, lineHeight: 1.6 }}>
+              {conversationDetails.summary.summary_text}
+            </p>
+          </div>
+          
           <SummaryGrid>
-            <SummaryItem>
-              <h4>🩺 Patient Concerns</h4>
-              <p>{conversationDetails.summary.patient_concerns}</p>
-            </SummaryItem>
-            
-            <SummaryItem>
-              <h4>⚕️ Medical Actions</h4>
-              <p>{conversationDetails.summary.medical_actions}</p>
-            </SummaryItem>
-            
-            <SummaryItem>
-              <h4>📅 Follow-up Required</h4>
-              <p>{conversationDetails.summary.follow_up_required ? 'Yes' : 'No'}</p>
-            </SummaryItem>
-            
-            {conversationDetails.summary.additional_notes && (
+            {conversationDetails.summary.key_points && conversationDetails.summary.key_points.length > 0 && (
               <SummaryItem>
-                <h4>📝 Additional Notes</h4>
-                <p>{conversationDetails.summary.additional_notes}</p>
+                <h4>🔍 Key Points</h4>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  {conversationDetails.summary.key_points.map((point: string, index: number) => (
+                    <li key={index} style={{ marginBottom: '5px', color: theme.colors.text }}>
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+              </SummaryItem>
+            )}
+            
+            {conversationDetails.summary.action_items && conversationDetails.summary.action_items.length > 0 && (
+              <SummaryItem>
+                <h4>✅ Action Items</h4>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  {conversationDetails.summary.action_items.map((item: string, index: number) => (
+                    <li key={index} style={{ marginBottom: '5px', color: theme.colors.text }}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </SummaryItem>
+            )}
+            
+            {conversationDetails.summary.topics && conversationDetails.summary.topics.length > 0 && (
+              <SummaryItem>
+                <h4>🏷️ Topics Discussed</h4>
+                <p style={{ margin: 0, color: theme.colors.text }}>
+                  {conversationDetails.summary.topics.join(' • ')}
+                </p>
+              </SummaryItem>
+            )}
+            
+            {conversationDetails.summary.sentiment && (
+              <SummaryItem>
+                <h4>😊 Session Sentiment</h4>
+                <p style={{ margin: 0, color: theme.colors.text, textTransform: 'capitalize' }}>
+                  {conversationDetails.summary.sentiment}
+                </p>
               </SummaryItem>
             )}
           </SummaryGrid>
         </SummarySection>
+      ) : (
+        <Container style={{ 
+          marginBottom: '30px',
+          background: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid rgba(255, 255, 255, 0.2)'
+        }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <h4 style={{ color: theme.colors.text, margin: '0 0 10px 0', opacity: 0.8 }}>
+              📋 No Medical Summary Available
+            </h4>
+            <p style={{ color: theme.colors.text, margin: 0, opacity: 0.6 }}>
+              Medical summaries are automatically generated after medical actions (lab orders, appointments) or when sessions end.
+            </p>
+          </div>
+        </Container>
       )}
 
       <TranscriptSection>

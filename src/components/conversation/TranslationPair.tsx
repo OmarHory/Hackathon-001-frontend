@@ -106,12 +106,12 @@ const TranslationPair: React.FC<TranslationPairProps> = ({ pair, style = {} }) =
               padding: '12px',
               borderRadius: '8px',
               border: '1px solid rgba(135, 206, 235, 0.3)',
-              color: pair.translatedText ? (pair.isComplete ? 'white' : '#E0E0E0') : '#B0B0B0',
+              color: pair.translatedText && pair.translatedText.trim() ? (pair.isComplete ? 'white' : '#E0E0E0') : '#B0B0B0',
               fontStyle: pair.isComplete ? 'normal' : 'italic',
             }}
           >
-            {pair.translatedText || 'Translating...'}
-            {pair.translatedText && !pair.isComplete && (
+            {pair.translatedText && pair.translatedText.trim() ? pair.translatedText : 'Translating...'}
+            {pair.translatedText && pair.translatedText.trim() && !pair.isComplete && (
               <span style={{ 
                 marginLeft: '5px', 
                 animation: 'blink 1s infinite',

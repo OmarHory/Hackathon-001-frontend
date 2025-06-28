@@ -78,21 +78,24 @@ export const useVoiceConversation = () => {
     }
     
     translationTimeoutRef.current = setTimeout(() => {
-      console.log('🚨 EMERGENCY TIMEOUT: Translation completely stuck, forcing recovery');
+      console.log('🚨 EMERGENCY TIMEOUT: Translation stuck, forcing completion');
       
-      // Only trigger if we actually have a stuck translation pair
+      // Force complete any stuck translation pair
       if (currentPairRef.current) {
-        const fallbackText = assistantTranscriptRef.current || 'Translation timeout';
+        const fallbackText = assistantTranscriptRef.current.trim() || 'Translation timeout - please try again';
         console.log('🔧 Force completing with fallback:', fallbackText);
         dispatch(updateTranslationPair({
           id: currentPairRef.current,
-          translatedText: fallbackText
+          translatedText: fallbackText,
+          isComplete: true
         }));
+        
+        // Clear refs
+        currentPairRef.current = null;
+        assistantTranscriptRef.current = '';
       }
       
-      // Reset state
-      currentPairRef.current = null;
-      assistantTranscriptRef.current = '';
+      // Reset all pending states
       dispatch(setPendingUserMessage(false));
       dispatch(clearMessageQueue());
       
@@ -101,7 +104,7 @@ export const useVoiceConversation = () => {
         isListening: false 
       }));
       
-    }, 4000); // Reduced to 4 seconds for faster recovery
+    }, 6000); // 6 seconds timeout
   }, [dispatch]);
 
   const clearEmergencyTimeout = useCallback(() => {
@@ -110,6 +113,26 @@ export const useVoiceConversation = () => {
       translationTimeoutRef.current = null;
     }
   }, []);
+
+  // Force complete any incomplete translation pairs
+  const forceCompleteIncompleteTranslations = useCallback(() => {
+    // Complete the current pair if it exists
+    if (currentPairRef.current) {
+      const finalText = assistantTranscriptRef.current.trim() || 'Session ended';
+      console.log('🔧 Force completing translation pair on session end:', finalText);
+      dispatch(updateTranslationPair({
+        id: currentPairRef.current,
+        translatedText: finalText,
+        isComplete: true
+      }));
+      
+      currentPairRef.current = null;
+      assistantTranscriptRef.current = '';
+    }
+    
+    // Clear any timeouts
+    clearEmergencyTimeout();
+  }, [dispatch, clearEmergencyTimeout]);
 
   // Enhanced status update 
   const updateVoiceStatusWithTracking = useCallback((payload: { 
@@ -382,7 +405,7 @@ export const useVoiceConversation = () => {
         type: "response.create",
         response: {
           modalities: ["text", "audio"],
-          instructions: "ONLY say 'Done' - one word only. Do NOT say anything else. Do NOT provide explanations. Do NOT translate. Just 'Done'."
+          instructions: "Say EXACTLY 'Done' - one single word only. Do NOT say 'Done.' with a period. Do NOT say 'Done, the lab order has been sent'. Do NOT explain anything. Do NOT translate. Just say 'Done' and stop immediately."
         }
       };
       
@@ -623,11 +646,24 @@ export const useVoiceConversation = () => {
           if (event.transcript && event.transcript.trim()) {
             dispatch(setLastTranslation(event.transcript.trim()));
             console.log('✅ Finalizing assistant transcript');
-            finalizeAssistantTranscript(event.transcript);
+            finalizeAssistantTranscript(event.transcript.trim());
+          } else if (currentPairRef.current) {
+            // If no transcript but we have a pair, mark it as failed
+            console.log('⚠️ No transcript received, marking pair as failed');
+            dispatch(updateTranslationPair({
+              id: currentPairRef.current,
+              translatedText: 'Translation failed - please try again',
+              isComplete: true
+            }));
           }
           
           // Clear emergency timeout and update status
           clearEmergencyTimeout();
+          
+          // Reset current pair reference
+          currentPairRef.current = null;
+          assistantTranscriptRef.current = '';
+          
           updateVoiceStatusWithTracking({ 
             status: '✅ Translation complete! Ready for next speaker...', 
             isListening: false 
@@ -639,17 +675,18 @@ export const useVoiceConversation = () => {
           console.log('🔍 Final assistant transcript:', assistantTranscriptRef.current);
           console.log('🔍 Current pair ref:', currentPairRef.current);
           
-          // If we have a pair but no transcript, something went wrong
-          if (currentPairRef.current && assistantTranscriptRef.current === '') {
-            console.log('🚨 Response done but no transcript received! Forcing fallback completion');
+          // If we still have a pair that hasn't been completed, force completion
+          if (currentPairRef.current) {
+            const finalText = assistantTranscriptRef.current.trim() || 'Translation not received - please try again';
+            console.log('🚨 Force completing remaining pair with:', finalText);
             dispatch(updateTranslationPair({
               id: currentPairRef.current,
-              translatedText: 'Translation not received - please try again',
+              translatedText: finalText,
               isComplete: true
             }));
           }
           
-          // Clear any emergency timeouts and ensure ready state
+          // Clear all emergency timeouts and ensure clean state
           clearEmergencyTimeout();
           dispatch(setPendingUserMessage(false));
           assistantTranscriptRef.current = '';
@@ -734,6 +771,9 @@ export const useVoiceConversation = () => {
     try {
       console.log('🛑 Stopping voice chat...');
       dispatch(updateVoiceStatus({ status: '💾 Saving conversation and generating summary...' }));
+      
+      // Force complete any incomplete translations first
+      forceCompleteIncompleteTranslations();
       
       // Get session ID from multiple sources
       const sessionId = connection?.sessionId || currentSession?.session_id || webrtcService.getConnection().sessionId;
@@ -899,5 +939,10 @@ export const useVoiceConversation = () => {
     connection,
     translationPairs,
     currentSession,
+    generateSummaryOnly,
+    summarizeAndEndConversation,
+    forceCompleteIncompleteTranslations,
+    // Add error handler helpers for external use
+    checkBrowserSupport
   };
 }; 
